@@ -1,0 +1,24 @@
+# Build output
+build/
+*.elf
+*.hex
+*.uf2
+*.o
+*.a
+
+# Editors
+.vscode/
+.idea/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Web app
+node_modules/
+dist/
+.env
+
+# Temp and backup files
+*.bak
+*.tmp
