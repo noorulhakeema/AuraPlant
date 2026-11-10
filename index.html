@@ -12,7 +12,7 @@
   <pre id="log"></pre>
 
 <script>
-// UUIDs from nRF Connect
+// UUIDs from nRF Connect (Nordic UART Service)
 const SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const RX      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // we WRITE here
 const TX      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // we LISTEN here
@@ -22,8 +22,6 @@ const log = (t) => document.getElementById("log").textContent += t + "\n";
 
 document.getElementById("connectBtn").onclick = async () => {
   try {
-    // Pop up the device picker. We list all devices because the chip may
-    // not advertise the service UUID in its name packet.
     const device = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
       optionalServices: [SERVICE]
