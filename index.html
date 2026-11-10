@@ -10,42 +10,75 @@
   <button id="connectBtn">Connect</button>
   <button id="sendBtn" disabled>Send "R:WATER"</button>
   <pre id="log"></pre>
+  <button id="listenBtn" disabled>Start listening</button>
+  <p id="heard"></p>
 
 <script>
-// UUIDs from nRF Connect (Nordic UART Service)
 const SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-const RX      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // we WRITE here
-const TX      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // we LISTEN here
+const RX      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+const TX      = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+// Kind words the plant likes (edit freely)
+const KIND_WORDS = ["beautiful","love","grow","great","amazing","proud","well done","good job","pretty","thank you","healthy"];
 
 let rxChar;
 const log = (t) => document.getElementById("log").textContent += t + "\n";
 
+async function sendToPlant(text) {
+  if (!rxChar) return;
+  await rxChar.writeValueWithoutResponse(new TextEncoder().encode(text + "\n"));
+  log("Sent " + text);
+}
+
 document.getElementById("connectBtn").onclick = async () => {
   try {
     const device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: [SERVICE]
+      acceptAllDevices: true, optionalServices: [SERVICE]
     });
     const server  = await device.gatt.connect();
     const service = await server.getPrimaryService(SERVICE);
     rxChar = await service.getCharacteristic(RX);
     const txChar = await service.getCharacteristic(TX);
-
     await txChar.startNotifications();
     txChar.addEventListener("characteristicvaluechanged", (e) => {
       log("Device says: " + new TextDecoder().decode(e.target.value));
     });
-
     log("Connected!");
     document.getElementById("sendBtn").disabled = false;
-  } catch (err) {
-    log("Error: " + err);
-  }
+    document.getElementById("listenBtn").disabled = false;
+  } catch (err) { log("Error: " + err); }
 };
 
-document.getElementById("sendBtn").onclick = async () => {
-  await rxChar.writeValueWithoutResponse(new TextEncoder().encode("R:WATER\n"));
-  log("Sent R:WATER");
+document.getElementById("sendBtn").onclick = () => sendToPlant("R:WATER");
+
+// ---- Speech recognition ----
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec, listening = false, lastSent = 0;
+
+document.getElementById("listenBtn").onclick = () => {
+  if (!SR) { log("Speech recognition not supported in this browser"); return; }
+  if (listening) { listening = false; rec.stop(); return; }
+
+  rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = "en-US";
+
+  rec.onresult = (e) => {
+    const text = e.results[e.results.length - 1][0].transcript.toLowerCase();
+    document.getElementById("heard").textContent = "Heard: " + text;
+    const found = KIND_WORDS.some(w => text.includes(w));
+    if (found && Date.now() - lastSent > 4000) {   // 4 s cooldown
+      lastSent = Date.now();
+      sendToPlant("A:1");
+    }
+  };
+  rec.onend = () => { if (listening) rec.start(); };   // keep listening
+  rec.onerror = (e) => log("Speech error: " + e.error);
+
+  listening = true;
+  rec.start();
+  document.getElementById("listenBtn").textContent = "Stop listening";
 };
 </script>
 </body>
