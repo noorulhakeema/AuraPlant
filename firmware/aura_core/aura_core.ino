@@ -75,6 +75,10 @@ const unsigned long WATER_INTERVAL = 20000;  // DEMO: 1 minute (real plant: 3 da
 const float LIGHT_GOOD = 5.0f;               // placeholder, we'll tune it
 const float LIGHT_DARK = 0.5f;               // placeholder, we'll tune it
 
+unsigned long reactUntil = 0;     // forces the happy face until this time
+unsigned long nextBlink = 4000;   // when the next blink starts
+unsigned long blinkEnd = 0;
+bool blinking = false;
 void servoWrite(int us) {
   if (!servoOk) return;
   servo2.setServo(SERVO_CHANNEL, us);
@@ -114,6 +118,7 @@ void reactHappy() {                        // full rise: "that was kind!"
   servoGoTo(SERVO_HAPPY);
   servoRestAt = millis() + 4500;           // rises ~1.75 s, holds ~2.75 s, then lowers
   addMood(15);
+  reactUntil = millis() + 3000;     // show the happy face for 3 s
 }
 
 float readLoudness() {
@@ -196,6 +201,7 @@ int moodToServo() {
 }
 // Which face should we show right now? 0=happy 1=okay 2=sad 3=thirsty
 int chooseFace() {
+  if (millis() < reactUntil) return 0;
   if (millis() - lastWatered > WATER_INTERVAL) return 3;
   if (mood >= 70) return 0;
   if (mood >= 40) return 1;
@@ -231,6 +237,33 @@ void drawFace(int face) {
     display.drawLine(28, 50, 36, 42, 255, 0, 0);
     display.drawLine(36, 42, 60, 42, 255, 0, 0);
     display.drawLine(60, 42, 68, 50, 255, 0, 0);
+  }
+}
+
+// Redraw only the eyes. Black rectangles erase the old eyes first.
+void drawEyes(bool open) {
+  display.drawRect(22, 12, 14, 18, true, 0, 0, 0);
+  display.drawRect(60, 12, 14, 18, true, 0, 0, 0);
+  if (open) {
+    display.drawRect(24, 14, 10, 14, true, 255, 255, 255);
+    display.drawRect(62, 14, 10, 14, true, 255, 255, 255);
+  } else {
+    display.drawLine(24, 21, 34, 21, 255, 255, 255);
+    display.drawLine(62, 21, 72, 21, 255, 255, 255);
+  }
+}
+
+void updateBlink() {
+  if (lastFace == 3) return;                 // the thirsty face already has closed eyes
+  unsigned long now = millis();
+  if (!blinking && now > nextBlink) {
+    blinking = true;
+    blinkEnd = now + 150;                    // eyes stay closed 150 ms
+    drawEyes(false);
+  } else if (blinking && now > blinkEnd) {
+    blinking = false;
+    nextBlink = now + 3000 + (now % 2000);   // next blink in 3 to 5 s
+    drawEyes(true);
   }
 }
 
@@ -275,7 +308,9 @@ void setup() {
   } else {
     SerialMonitorInterface.println("Servo controller NOT detected!");
   }
+
   drawFace(1);                  // show a neutral face while warming up
+
   SerialMonitorInterface.println("Warming up mic (20 s), stay quiet...");
   unsigned long warmStart = millis();
   while (millis() - warmStart < 20000) {
@@ -324,6 +359,7 @@ void loop() {
 
   updateMood();
   updateFace();
+  updateBlink();
   // Happy wiggle: flip between two positions every 400 ms
   if (millis() < wiggleUntil) {
     servoGoTo(((millis() / 400) % 2) ? SERVO_HAPPY : SERVO_PERK);
