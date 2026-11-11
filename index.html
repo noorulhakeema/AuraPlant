@@ -12,7 +12,7 @@
   <pre id="log"></pre>
   <button id="listenBtn" disabled>Start listening</button>
   <p id="heard"></p>
-
+  <button id="waterBtn" disabled>I watered it</button>
 <script>
 const SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const RX      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
@@ -46,6 +46,7 @@ document.getElementById("connectBtn").onclick = async () => {
     log("Connected!");
     document.getElementById("sendBtn").disabled = false;
     document.getElementById("listenBtn").disabled = false;
+    document.getElementById("waterBtn").disabled = false;
   } catch (err) { log("Error: " + err); }
 };
 
@@ -80,6 +81,8 @@ document.getElementById("listenBtn").onclick = () => {
   rec.start();
   document.getElementById("listenBtn").textContent = "Stop listening";
 };
+document.getElementById("waterBtn").onclick = () => sendToPlant("W:1");
+
 </script>
 </body>
 </html>
