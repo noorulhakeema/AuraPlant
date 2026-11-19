@@ -1,5 +1,5 @@
 
-package com.example.auraplant.ui.theme
+package com.example.auraplantapp.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
