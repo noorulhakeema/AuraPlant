@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "365788302970",
+    "project_id": "auraplant-8d739",
+    "storage_bucket": "auraplant-8d739.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:365788302970:android:91a4ec7eac01cfcf55f5c3",
+        "android_client_info": {
+          "package_name": "com.example.auraplantapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBQ9IqJ1honWcKblh-bCAAAvLuC-Ztrxxc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
