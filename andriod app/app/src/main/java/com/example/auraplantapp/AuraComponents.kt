@@ -172,3 +172,136 @@ fun SegmentedStatusRow(label: String, level: Int, icon: String) {
     }
 }
 
+// Add these imports at the TOP of AuraComponents.kt:
+// import androidx.compose.foundation.clickable
+// import androidx.compose.foundation.shape.CircleShape
+// import androidx.compose.ui.draw.clip
+
+data class DayMoodEntry(
+    val dayLabel: String, // e.g., "SUN", "MON", or "1", "2"
+    val mood: PlantMood
+)
+
+//mood for calendar
+
+@Composable
+fun DailyMoodCalendarCard(
+    title: String = "MOOD TRACKING",
+    entries: List<DayMoodEntry>,
+    onDayClick: (DayMoodEntry) -> Unit = {}
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = CardSurface,
+        border = BorderStroke(1.dp, BarEmpty)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextDark
+            )
+
+            // 7-column grid so both weekly (SUN–SAT) and monthly calendars align cleanly
+            val weeks = entries.chunked(7)
+            weeks.forEach { week ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    week.forEach { entry ->
+                        val badgeColor = when (entry.mood) {
+                            PlantMood.HAPPY -> SageHeader
+                            PlantMood.THIRSTY -> BarOrange
+                            PlantMood.SAD -> BarRed
+                        }
+                        val faceEmoji = when (entry.mood) {
+                            PlantMood.HAPPY -> "😊"
+                            PlantMood.THIRSTY -> "😐"
+                            PlantMood.SAD -> "☹️"
+                        }
+
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onDayClick(entry) }
+                                .padding(vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = entry.dayLabel,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextDark.copy(alpha = 0.75f)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .background(badgeColor.copy(alpha = 0.25f), CircleShape)
+                                    .border(1.5.dp, badgeColor, CircleShape)
+                            ) {
+                                Text(text = faceEmoji, fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+//Navigation Bar
+
+@Composable
+fun AuraBottomNavBar(
+    selectedIndex: Int,
+    onTabSelected: (Int) -> Unit
+) {
+    val tabs = listOf("DASHBOARD", "JOURNAL", "STATS", "SETTINGS")
+    val icons = listOf("⊞", "📓", "📈", "⚙️")
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = CardSurface,
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(vertical = 10.dp, horizontal = 8.dp),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            tabs.forEachIndexed { index, label ->
+                val isSelected = index == selectedIndex
+                val itemColor = if (isSelected) SageHeader else TextDark.copy(alpha = 0.55f)
+
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable { onTabSelected(index) }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(text = icons[index], fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = label,
+                        fontSize = 10.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = itemColor
+                    )
+                }
+            }
+        }
+    }
+}
+
