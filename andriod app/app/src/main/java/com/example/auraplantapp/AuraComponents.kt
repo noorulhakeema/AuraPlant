@@ -20,6 +20,20 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 
 enum class PlantMood { HAPPY, SAD, THIRSTY }
 
@@ -172,10 +186,7 @@ fun SegmentedStatusRow(label: String, level: Int, icon: String) {
     }
 }
 
-// Add these imports at the TOP of AuraComponents.kt:
-// import androidx.compose.foundation.clickable
-// import androidx.compose.foundation.shape.CircleShape
-// import androidx.compose.ui.draw.clip
+
 
 data class DayMoodEntry(
     val dayLabel: String, // e.g., "SUN", "MON", or "1", "2"
@@ -304,4 +315,117 @@ fun AuraBottomNavBar(
         }
     }
 }
+
+
+@Composable
+fun RecordQuoteDialog(
+    currentQuote: String,
+    onDismiss: () -> Unit,
+    onSaveQuote: (String) -> Unit
+) {
+    var draftQuote by remember(currentQuote) { mutableStateOf(currentQuote) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CardSurface,
+        title = {
+            Text(
+                text = "Record Quote of the Day",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = TextDark
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Add a motivational quote or affirmation for your plant:",
+                    fontSize = 13.sp,
+                    color = TextDark.copy(alpha = 0.75f)
+                )
+                OutlinedTextField(
+                    value = draftQuote,
+                    onValueChange = { draftQuote = it },
+                    placeholder = { Text("e.g., Small steps every day grow strong roots.") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val trimmed = draftQuote.trim()
+                    if (trimmed.isNotEmpty()) {
+                        onSaveQuote(trimmed)
+                    }
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = SageHeader,
+                    contentColor = CardSurface
+                )
+            ) {
+                Text("Save Quote")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = TextDark)
+            }
+        }
+    )
+}
+
+
+@Composable
+fun DailyQuoteCard(
+    quote: String,
+    hasAudioQuote: Boolean = false,
+    isPlayingAudio: Boolean = false,
+    onTogglePlayAudio: () -> Unit = {}
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = TerracottaBox
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = quote,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                color = CardSurface,
+                fontWeight = FontWeight.Medium
+            )
+
+            if (hasAudioQuote) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .background(
+                            color = CardSurface.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .clickable { onTogglePlayAudio() }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = if (isPlayingAudio) "⏹ Stop Audio Quote" else "▶ Play Recorded Quote",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = CardSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+
 

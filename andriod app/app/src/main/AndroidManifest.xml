@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!-- microphone audio-->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <!-- Declare that your app requires BLE hardware -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
