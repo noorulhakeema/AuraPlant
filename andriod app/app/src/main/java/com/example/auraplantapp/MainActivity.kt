@@ -63,6 +63,11 @@ import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.initialize
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import androidx.compose.material3.Button
+import android.util.Log
 
 
 class MainActivity : ComponentActivity() {
@@ -87,6 +92,69 @@ class MainActivity : ComponentActivity() {
 fun AuraPlantRootScreen() {
 
     val context = LocalContext.current
+
+    // Bluetooth connection states
+    var bluetoothStatus by remember {
+        mutableStateOf("Not connected")
+    }
+
+    var isBluetoothReady by remember {
+        mutableStateOf(false)
+    }
+
+    var lastDeviceMessage by remember {
+        mutableStateOf("")
+    }
+
+// Ensure Bluetooth callbacks update Compose state on the main thread
+    val mainHandler = remember {
+        Handler(Looper.getMainLooper())
+    }
+
+// Create Bluetooth manager
+    val bluetoothManager = remember(context) {
+
+        PlantBluetoothManager(
+            context = context,
+
+            onMessageReceived = { message ->
+                mainHandler.post {
+                    lastDeviceMessage = message
+
+                    Log.d("AuraPlant BLE", "Device says: $message")
+                }
+            },
+
+            onStatusChanged = { status ->
+                mainHandler.post {
+                    bluetoothStatus = status
+
+                    isBluetoothReady =
+                        status == "Connected and ready!"
+
+                    Log.d("AuraPlant BLE", status)
+                }
+            }
+        )
+    }
+
+    val bluetoothPermissionLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+
+            val granted = permissions.values.all { it }
+
+            if (granted) {
+
+                bluetoothManager.scanForPlant()
+
+            } else {
+
+                bluetoothStatus =
+                    "Bluetooth permissions were denied."
+            }
+        }
 
     var selectedTab by remember {
         mutableIntStateOf(0)
@@ -258,6 +326,41 @@ fun AuraPlantRootScreen() {
         }
     }
 
+    fun connectToPlant() {
+
+        val requiredPermissions =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+
+                arrayOf(
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                )
+
+            } else {
+
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                )
+            }
+
+        val missingPermissions = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(
+                context,
+                it
+            ) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPermissions.isEmpty()) {
+
+            bluetoothManager.scanForPlant()
+
+        } else {
+
+            bluetoothPermissionLauncher.launch(
+                missingPermissions.toTypedArray()
+            )
+        }
+    }
 
     // Speech-to-text transcriber
     val speechTranscriber = remember {
@@ -325,6 +428,8 @@ fun AuraPlantRootScreen() {
         onDispose {
             audioRecorder.releaseAll()
             speechTranscriber.release()
+
+            bluetoothManager.disconnect()
         }
     }
 
@@ -489,6 +594,20 @@ fun AuraPlantRootScreen() {
 
                     lightLevel = lightLevel,
 
+                    bluetoothStatus = bluetoothStatus,
+
+                    lastDeviceMessage = lastDeviceMessage,
+
+                    isBluetoothReady = isBluetoothReady,
+
+                    onConnectToPlant = {
+                        connectToPlant()
+                    },
+
+                    onWaterPlant = {
+                        bluetoothManager.sendToPlant("R:WATER")
+                    },
+
                     dailyMotivationalQuote = dailyMotivationalQuote,
 
                     onRefreshQuote = {
@@ -580,6 +699,11 @@ fun DashboardTabContent(
     currentMood: PlantMood,
     waterLevel: Int,
     lightLevel: Int,
+    bluetoothStatus: String,
+    lastDeviceMessage: String,
+    isBluetoothReady: Boolean,
+    onConnectToPlant: () -> Unit,
+    onWaterPlant: () -> Unit,
     dailyMotivationalQuote: String,
     onRefreshQuote: () -> Unit,
     quoteText: String,
@@ -735,6 +859,54 @@ fun DashboardTabContent(
                 )
             }
 
+            // Bluetooth connection controls
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+
+                Text(
+                    text = "PLANT CONNECTION",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextDark
+                )
+
+                Text(
+                    text = bluetoothStatus,
+                    color = TextDark,
+                    fontSize = 14.sp
+                )
+
+                // Connect button
+                OutlinedButton(
+                    onClick = onConnectToPlant,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Connect to Plant")
+                }
+
+                // Water button
+                Button(
+                    onClick = onWaterPlant,
+                    enabled = isBluetoothReady,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Water Plant")
+                }
+
+                // Display the latest message received
+                if (lastDeviceMessage.isNotBlank()) {
+
+                    Text(
+                        text = "Device says: $lastDeviceMessage",
+                        color = TextDark,
+                        fontSize = 13.sp
+                    )
+                }
+            }
 
             // Water and Light Status
             StatusMetersCard(
