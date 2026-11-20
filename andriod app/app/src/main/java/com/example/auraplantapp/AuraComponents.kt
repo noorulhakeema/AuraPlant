@@ -34,6 +34,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+
 
 enum class PlantMood { HAPPY, SAD, THIRSTY }
 
@@ -426,6 +429,50 @@ fun DailyQuoteCard(
         }
     }
 }
+
+@Composable
+fun WaterPlantButton(
+    waterLevel: Int,
+    maxWaterLevel: Int = 5,
+    onWaterPlant: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isFull = waterLevel >= maxWaterLevel
+
+    Button(
+        onClick = onWaterPlant,
+        enabled = !isFull,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = SageHeader,
+            contentColor = CardSurface,
+            disabledContainerColor = SageHeader.copy(alpha = 0.45f),
+            disabledContentColor = CardSurface.copy(alpha = 0.8f)
+        )
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "🚿",
+                fontSize = 18.sp
+            )
+            Text(
+                text = if (isFull) {
+                    "Plant is Fully Watered ($waterLevel/$maxWaterLevel)"
+                } else {
+                    "Tap Watering Can to Water Plant ($waterLevel/$maxWaterLevel)"
+                },
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
 
 
 
