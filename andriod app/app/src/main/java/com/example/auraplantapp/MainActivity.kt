@@ -86,6 +86,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraPlantRootScreen() {
 
+    var isDeviceConnected by remember { mutableStateOf(false) }
+    var notificationsEnabled by remember { mutableStateOf(true) }
+
     val context = LocalContext.current
 
     var selectedTab by remember {
@@ -200,6 +203,8 @@ fun AuraPlantRootScreen() {
             delay(400)
             dotCount = if (dotCount >= 3) 1 else dotCount + 1
         }
+
+
     }
 
 
@@ -575,7 +580,13 @@ fun AuraPlantRootScreen() {
 
                 2 -> PlaceholderScreen("Stats & Sensor History")
 
-                3 -> PlaceholderScreen("Device & Notification Settings")
+                3 -> AuraSettingsScreen(
+                    deviceName = "TinyCircuits BLE Unit",
+                    isDeviceConnected = isDeviceConnected,
+                    onToggleDeviceConnection = { isDeviceConnected = !isDeviceConnected },
+                    notificationsEnabled = notificationsEnabled,
+                    onNotificationsEnabledChange = { notificationsEnabled = it }
+                )
             }
         }
     }
