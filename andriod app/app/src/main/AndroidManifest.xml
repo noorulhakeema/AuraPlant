@@ -18,6 +18,14 @@
 
     <!-- microphone audio-->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Notification permission for Android 13+ (API 33+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Declare that your app requires BLE hardware -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
 
     <uses-feature
