@@ -189,7 +189,7 @@ fun AuraPlantRootScreen() {
         mutableStateOf(false)
     }
 
-    // Animated "." / ".." / "..." shown while the AI has not responded yet
+    // Animated "." / "." / "..." shown while the AI has not responded yet
     var dotCount by remember {
         mutableIntStateOf(1)
     }
@@ -489,6 +489,14 @@ fun AuraPlantRootScreen() {
 
                     lightLevel = lightLevel,
 
+                    onWaterPlant = {
+                        val nextWater = (waterLevel + 1).coerceAtMost(5)
+                        waterLevel = nextWater
+                        if (nextWater >= 4) {
+                            currentMood = PlantMood.HAPPY
+                        }
+                    },
+
                     dailyMotivationalQuote = dailyMotivationalQuote,
 
                     onRefreshQuote = {
@@ -580,6 +588,7 @@ fun DashboardTabContent(
     currentMood: PlantMood,
     waterLevel: Int,
     lightLevel: Int,
+    onWaterPlant: () -> Unit,
     dailyMotivationalQuote: String,
     onRefreshQuote: () -> Unit,
     quoteText: String,
@@ -734,6 +743,13 @@ fun DashboardTabContent(
                     onTogglePlayAudio = onTogglePlayAudio
                 )
             }
+
+            //Water Button
+
+            WaterPlantButton(
+                waterLevel = waterLevel,
+                onWaterPlant = onWaterPlant
+            )
 
 
             // Water and Light Status
