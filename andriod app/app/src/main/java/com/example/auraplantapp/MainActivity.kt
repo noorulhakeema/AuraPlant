@@ -68,7 +68,29 @@ import android.os.Handler
 import android.os.Looper
 import androidx.compose.material3.Button
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.offset
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
+
+enum class PlantInteractionEvent {
+    NONE,
+    DROPPED,
+    PATTED
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -91,10 +113,95 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraPlantRootScreen() {
 
+
+
     var isDeviceConnected by remember { mutableStateOf(false) }
     var notificationsEnabled by remember { mutableStateOf(true) }
 
     val context = LocalContext.current
+
+
+    var currentMood by remember {
+        mutableStateOf(PlantMood.SAD)
+    }
+
+
+    var waterLevel by remember {
+        mutableIntStateOf(2)
+    }
+
+    var wateringCount by remember {
+        mutableIntStateOf(0)
+    }
+
+    var dropCount by remember {
+        mutableIntStateOf(0)
+    }
+
+    val lightLevel = 4
+
+
+    // [ADDED] Drop & Pat interaction state
+    var activeInteraction by remember {
+        mutableStateOf(PlantInteractionEvent.NONE)
+    }
+
+    var interactionAlertMessage by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    // Clear the drop/pat alert when the user dismisses the banner.
+    fun clearInteractionAlert() {
+        activeInteraction = PlantInteractionEvent.NONE
+        interactionAlertMessage = null
+    }
+
+    // [ADDED] Auto-clear "pat pat" animation after 2.4 seconds
+    LaunchedEffect(activeInteraction) {
+        if (activeInteraction == PlantInteractionEvent.PATTED) {
+            delay(2400)
+            if (activeInteraction == PlantInteractionEvent.PATTED) {
+                activeInteraction = PlantInteractionEvent.NONE
+                interactionAlertMessage = null
+            }
+        }
+    }
+
+    // [ADDED] Handle drop and pat events from BLE or test triggers
+    fun handleHardwareInteraction(event: String) {
+        when (event.trim().uppercase()) {
+
+            "DROP", "DROPPED" -> {
+                dropCount++
+
+                activeInteraction = PlantInteractionEvent.DROPPED
+                currentMood = PlantMood.SAD
+
+                interactionAlertMessage =
+                    "Ouch! I'm hurt! Please help me!"
+
+                if (notificationsEnabled) {
+                    AuraNotificationHelper.sendAlert(
+                        context = context,
+                        title = "AuraPlant Alert!",
+                        message = "Ouch! I'm hurt! Please help me!"
+                    )
+                }
+            }
+
+            "UPRIGHT", "NORMAL" -> {
+                activeInteraction = PlantInteractionEvent.NONE
+                interactionAlertMessage = null
+                currentMood = PlantMood.HAPPY
+            }
+
+            "PAT", "PATTED" -> {
+                activeInteraction = PlantInteractionEvent.PATTED
+                currentMood = PlantMood.HAPPY
+                interactionAlertMessage = "pat pat"
+            }
+        }
+    }
 
     // Bluetooth connection states
     var bluetoothStatus by remember {
@@ -124,6 +231,11 @@ fun AuraPlantRootScreen() {
                 mainHandler.post {
                     lastDeviceMessage = message
 
+                    // Process hardware interaction messages from the TinyCircuits device.
+                    // handleHardwareInteraction() ignores messages other than DROP/DROPPED
+                    // and PAT/PATTED.
+                    handleHardwareInteraction(message)
+
                     Log.d("AuraPlant BLE", "Device says: $message")
                 }
             },
@@ -140,6 +252,8 @@ fun AuraPlantRootScreen() {
             }
         )
     }
+
+
 
     val bluetoothPermissionLauncher =
         rememberLauncherForActivityResult(
@@ -163,16 +277,6 @@ fun AuraPlantRootScreen() {
         mutableIntStateOf(0)
     }
 
-    // Shared plant mood state
-    var currentMood by remember {
-        mutableStateOf(PlantMood.SAD)
-    }
-
-    var waterLevel by remember {
-        mutableIntStateOf(2)
-    }
-
-    val lightLevel = 4
 
     // Randomised motivational quotes
     val randomQuotes = remember {
@@ -273,8 +377,89 @@ fun AuraPlantRootScreen() {
         }
 
 
+
+
     }
 
+    // FULL SCREEN DROP WARNING
+    if (activeInteraction == PlantInteractionEvent.DROPPED) {
+
+        Dialog(
+            onDismissRequest = {
+                // Prevent accidental dismissal.
+                // The alert clears when TinyCircuits reports UPRIGHT.
+            },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false
+            )
+        ) {
+
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = BarRed,
+                shape = RoundedCornerShape(0.dp)
+            ) {
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+
+                    Text(
+                        text = "⚠",
+                        fontSize = 90.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(25.dp))
+
+                    Text(
+                        text = "OUCH!",
+                        fontSize = 42.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+
+                    Text(
+                        text = "I'M HURT!",
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+
+                    Spacer(modifier = Modifier.height(25.dp))
+
+                    Text(
+                        text = "My plant has fallen over!",
+                        fontSize = 20.sp,
+                        color = Color.White
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Please help me return to an upright position.",
+                        fontSize = 16.sp,
+                        color = Color.White,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(45.dp))
+
+                    Text(
+                        text = "Waiting for plant to be upright...",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
 
     // Send the completed transcript to Gemini
     fun analyzeCompletedQuote(finalTranscript: String) {
@@ -605,12 +790,21 @@ fun AuraPlantRootScreen() {
 
                     isBluetoothReady = isBluetoothReady,
 
+                    activeInteraction = activeInteraction,
+                    interactionAlertMessage = interactionAlertMessage,
+                    onSimulateDrop = { handleHardwareInteraction("DROP") },
+                    onSimulatePat = { handleHardwareInteraction("PAT") },
+                    onDismissAlert = { clearInteractionAlert() },
+
                     onConnectToPlant = {
                         connectToPlant()
                     },
 
                     onWaterPlant = {
                         bluetoothManager.sendToPlant("R:WATER")
+
+                        wateringCount++
+
                         val nextWater = (waterLevel + 1).coerceAtMost(5)
                         waterLevel = nextWater
                         if (nextWater >= 4) {
@@ -688,8 +882,9 @@ fun AuraPlantRootScreen() {
                             currentMood = PlantMood.SAD
                             waterLevel = 2
                         }
-                    }
-                )
+                    },
+
+                    )
 
                 1 -> MoodCalendarJournalScreen(
                     todayMood = currentMood
@@ -710,6 +905,8 @@ fun AuraPlantRootScreen() {
 }
 
 
+
+
 // Dashboard screen
 @Composable
 fun DashboardTabContent(
@@ -728,7 +925,12 @@ fun DashboardTabContent(
     isPlayingAudio: Boolean,
     onTogglePlayAudio: () -> Unit,
     weeklyMoods: List<DayMoodEntry>,
-    onToggleMood: () -> Unit
+    onToggleMood: () -> Unit,
+    activeInteraction: PlantInteractionEvent = PlantInteractionEvent.NONE,
+    interactionAlertMessage: String? = null,
+    onDismissAlert: () -> Unit = {},
+    onSimulateDrop: () -> Unit = {},
+    onSimulatePat: () -> Unit = {}
 ) {
 
     Column(
@@ -790,11 +992,17 @@ fun DashboardTabContent(
             }
 
             Box(
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.TopCenter
             ) {
                 TinyScreenFace(mood = currentMood)
+                PatHeartAnimationOverlay(
+                    visible = activeInteraction == PlantInteractionEvent.PATTED,
+                    modifier = Modifier.offset(y = (105).dp)
+                )
             }
         }
+
 
 
         // Main Body Cards
@@ -807,6 +1015,62 @@ fun DashboardTabContent(
                 ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // [AMENDED START] Dismissible notification banner for drop alert or pat message
+            if (interactionAlertMessage != null) {
+                val isDrop = activeInteraction == PlantInteractionEvent.DROPPED
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDrop) BarRed.copy(alpha = 0.14f) else SageHeader.copy(alpha = 0.18f),
+                    border = BorderStroke(
+                        width = 1.5.dp,
+                        color = if (isDrop) BarRed else SageHeader
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (!isDrop) {
+                                Icon(
+                                    imageVector = Icons.Default.Favorite,
+                                    contentDescription = "Pat Pat",
+                                    tint = BarRed,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Text(
+                                text = interactionAlertMessage,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDrop) BarRed else TextDark
+                            )
+                        }
+
+                        TextButton(
+                            onClick = onDismissAlert,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                text = "✕",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDrop) BarRed else TextDark
+                            )
+                        }
+                    }
+                }
+            }
+            // [AMENDED END]
+
 
             // Weekly Mood Tracking
             DailyMoodCalendarCard(
@@ -932,6 +1196,27 @@ fun DashboardTabContent(
                 }
             }
 
+            // Quick test buttons for Drop alert & Pat animation
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onSimulateDrop,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Test Drop Alert", color = BarRed, fontWeight = FontWeight.SemiBold)
+                }
+                OutlinedButton(
+                    onClick = onSimulatePat,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Test Pat ♥", color = SageHeader, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
             // Water and Light Status
             StatusMetersCard(
                 lightLevel = lightLevel,
@@ -1051,3 +1336,69 @@ fun PlaceholderScreen(title: String) {
         )
     }
 }
+
+//Patpat Feature
+
+@Composable
+fun PatHeartAnimationOverlay(
+    visible: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "patHeartTransition")
+    val heartScale by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.22f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 450),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "heartScale"
+    )
+    val floatOffset by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (-10f),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 450),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "heartFloat"
+    )
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(200)),
+        exit = fadeOut(animationSpec = tween(300)),
+        modifier = modifier
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = CardSurface,
+            border = BorderStroke(1.5.dp, TerracottaBox)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Favorite,
+                    contentDescription = "Loved Heart",
+                    tint = BarRed,
+                    modifier = Modifier.size(28.dp)
+                )
+                Text(
+                    text = "pat pat",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextDark
+                )
+            }
+        }
+    }
+}
+
+
+
+
+
+
