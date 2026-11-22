@@ -252,50 +252,118 @@ int chooseFace() {
   return 2;
 }
 
+
 void drawFace(int face) {
   display.clearScreen();
 
+  // ---------- GREEN LEAVES ----------
+  // Shared across all expressions.
+  display.drawRect(39, 5, 9, 4, true, 83, 220, 77);
+  display.drawRect(30, 7, 17, 5, true, 83, 220, 77);
+  display.drawRect(23, 10, 22, 5, true, 83, 220, 77);
+  display.drawRect(20, 14, 20, 4, true, 83, 220, 77);
+  display.drawRect(24, 18, 13, 3, true, 83, 220, 77);
+
+  display.drawRect(48, 5, 9, 4, true, 83, 220, 77);
+  display.drawRect(49, 7, 17, 5, true, 83, 220, 77);
+  display.drawRect(51, 10, 22, 5, true, 83, 220, 77);
+  display.drawRect(56, 14, 20, 4, true, 83, 220, 77);
+  display.drawRect(59, 18, 13, 3, true, 83, 220, 77);
+
+  // ---------- BLUSH ----------
+  // Dizzy uses cyan-blue; all other faces use pink.
   if (face == 4) {
-    // Dizzy: X eyes and wavy mouth
-    display.drawLine(22, 12, 36, 28, 255, 255, 255);
-    display.drawLine(36, 12, 22, 28, 255, 255, 255);
-    display.drawLine(60, 12, 74, 28, 255, 255, 255);
-    display.drawLine(74, 12, 60, 28, 255, 255, 255);
-    display.drawLine(30, 46, 40, 40, 255, 128, 0);
-    display.drawLine(40, 40, 50, 46, 255, 128, 0);
-    display.drawLine(50, 46, 60, 40, 255, 128, 0);
-    display.drawLine(60, 40, 66, 46, 255, 128, 0);
-    return;
+    for (int i = 0; i < 3; i++) {
+      int x = 12 + i * 4;
+      int y = (i == 1) ? 43 : 41;
+      display.drawRect(x, y, 2, 7, true, 112, 211, 255);
+      display.drawRect(82 - i * 4, y, 2, 7, true, 112, 211, 255);
+    }
+  } else {
+    display.drawRect(11, 42, 11, 4, true, 255, 143, 177);
+    display.drawRect(13, 46, 7, 2, true, 255, 143, 177);
+    display.drawRect(74, 42, 11, 4, true, 255, 143, 177);
+    display.drawRect(76, 46, 7, 2, true, 255, 143, 177);
   }
 
-  if (face == 3) {
-    // Thirsty: closed eyes (flat lines) and a small round mouth
-    display.drawLine(22, 22, 36, 22, 255, 255, 255);
-    display.drawLine(60, 22, 74, 22, 255, 255, 255);
-    display.drawRect(44, 38, 8, 8, true, 0, 150, 255);   // blue "drop" mouth
-    display.setFont(thinPixel7_10ptFontInfo);
-    display.fontColor(TS_8b_Yellow, TS_8b_Black);
-    display.setCursor(28, 52);
-    display.print("water me");
-    return;
+  // ---------- EYES ----------
+  if (face == 0) {
+    // Happy: closed, upward-curved eyes.
+    display.drawLine(24, 32, 29, 26, 255, 255, 255);
+    display.drawLine(29, 26, 34, 32, 255, 255, 255);
+    display.drawLine(62, 32, 67, 26, 255, 255, 255);
+    display.drawLine(67, 26, 72, 32, 255, 255, 255);
+
+  } else if (face == 3) {
+    // Thirsty: tired, horizontal eyes.
+    display.drawRect(24, 31, 11, 3, true, 255, 255, 255);
+    display.drawRect(61, 31, 11, 3, true, 255, 255, 255);
+
+  } else if (face == 4) {
+    // Dizzy: two pixel-style spirals.
+    display.drawLine(23, 29, 23, 25, 255, 255, 255);
+    display.drawLine(23, 25, 28, 22, 255, 255, 255);
+    display.drawLine(28, 22, 34, 25, 255, 255, 255);
+    display.drawLine(34, 25, 34, 32, 255, 255, 255);
+    display.drawLine(34, 32, 27, 35, 255, 255, 255);
+    display.drawLine(27, 35, 26, 29, 255, 255, 255);
+    display.drawLine(26, 29, 30, 27, 255, 255, 255);
+
+    display.drawLine(61, 29, 61, 25, 255, 255, 255);
+    display.drawLine(61, 25, 66, 22, 255, 255, 255);
+    display.drawLine(66, 22, 72, 25, 255, 255, 255);
+    display.drawLine(72, 25, 72, 32, 255, 255, 255);
+    display.drawLine(72, 32, 65, 35, 255, 255, 255);
+    display.drawLine(65, 35, 64, 29, 255, 255, 255);
+    display.drawLine(64, 29, 68, 27, 255, 255, 255);
+
+  } else {
+    // Okay and Sad: upright white eyes.
+    display.drawRect(25, 25, 9, 12, true, 255, 255, 255);
+    display.drawRect(62, 25, 9, 12, true, 255, 255, 255);
   }
 
-  // Eyes (same for happy, okay and sad)
-  display.drawRect(24, 14, 10, 14, true, 255, 255, 255);
-  display.drawRect(62, 14, 10, 14, true, 255, 255, 255);
+  // ---------- MOUTHS ----------
+  if (face == 0) {
+    // Happy: pink open smile.
+    display.drawRect(39, 43, 18, 5, true, 255, 150, 185);
+    display.drawRect(42, 48, 12, 4, true, 255, 150, 185);
+    display.drawRect(45, 52, 6, 2, true, 255, 150, 185);
 
-  if (face == 0) {          // happy: U-shaped smile
-    display.drawLine(28, 40, 36, 50, 0, 255, 0);
-    display.drawLine(36, 50, 60, 50, 0, 255, 0);
-    display.drawLine(60, 50, 68, 40, 0, 255, 0);
-  } else if (face == 1) {   // okay: flat mouth
-    display.drawLine(30, 46, 66, 46, 255, 255, 0);
-  } else {                  // sad: upside-down U
-    display.drawLine(28, 50, 36, 42, 255, 0, 0);
-    display.drawLine(36, 42, 60, 42, 255, 0, 0);
-    display.drawLine(60, 42, 68, 50, 255, 0, 0);
+  } else if (face == 1) {
+    // Okay: small white smile.
+    display.drawLine(42, 44, 46, 48, 255, 255, 255);
+    display.drawLine(46, 48, 50, 48, 255, 255, 255);
+    display.drawLine(50, 48, 54, 44, 255, 255, 255);
+
+  } else if (face == 2) {
+    // Sad: downturned mouth.
+    display.drawLine(40, 51, 45, 46, 255, 255, 255);
+    display.drawLine(45, 46, 51, 46, 255, 255, 255);
+    display.drawLine(51, 46, 56, 51, 255, 255, 255);
+
+  } else if (face == 3) {
+    // Thirsty: small white frown.
+    display.drawLine(42, 49, 46, 45, 255, 255, 255);
+    display.drawLine(46, 45, 50, 45, 255, 255, 255);
+    display.drawLine(50, 45, 54, 49, 255, 255, 255);
+
+    // Small cyan water indicator.
+    display.drawRect(82, 23, 4, 5, true, 70, 190, 255);
+    display.drawRect(80, 28, 8, 5, true, 70, 190, 255);
+    display.drawRect(82, 33, 4, 2, true, 70, 190, 255);
+
+  } else if (face == 4) {
+    // Dizzy: connected ^^^ mouth.
+    display.drawLine(36, 50, 40, 45, 255, 255, 255);
+    display.drawLine(40, 45, 44, 50, 255, 255, 255);
+    display.drawLine(44, 50, 48, 45, 255, 255, 255);
+    display.drawLine(48, 45, 52, 50, 255, 255, 255);
+    display.drawLine(52, 50, 56, 45, 255, 255, 255);
+    display.drawLine(56, 45, 60, 50, 255, 255, 255);
   }
 }
+
 
 // Redraw only the eyes. Black rectangles erase the old eyes first.
 void drawEyes(bool open) {
