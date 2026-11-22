@@ -18,7 +18,7 @@ ServoDriver servo2(NO_R_REMOVED);   // used after BLE, never pulses the reset pi
 #define SerialMonitorInterface SerialUSB
 
 // ---- Accelerometer ----
-UBMA250 accel;
+BMA250 accel;
 bool accelOk = false;
 int lastAx = 0, lastAy = 0, lastAz = 0;
 unsigned long lastAccelRead = 0;
@@ -106,6 +106,8 @@ unsigned long nextBlink = 4000;   // when the next blink starts
 unsigned long blinkEnd = 0;
 bool blinking = false;
 
+#include "AuraApprovedDisplay.h"
+
 // ================= SERVO =================
 void servoWrite(int us) {
   if (!servoOk) return;
@@ -144,12 +146,14 @@ void addMood(float amount) {
 
 // ================= REACTIONS =================
 void reactPerk() {                         // small rise: "I heard you"
+  auraStartTalking();                      // NEW: talking animation
   servoGoTo(SERVO_PERK);
   servoRestAt = millis() + 2500;           // starts lowering after 2.5 s
   addMood(5);
 }
 
 void reactHappy() {                        // full rise: "that was kind!"
+  auraStartExcited();                      // NEW: excited animation
   servoGoTo(SERVO_HAPPY);
   servoRestAt = millis() + 4500;           // rises ~1.75 s, holds ~2.75 s, then lowers
   addMood(15);
@@ -157,6 +161,7 @@ void reactHappy() {                        // full rise: "that was kind!"
 }
 
 void reactWater() {                        // big fast sweep: "thank you for the water!"
+  auraStartWater();                        // NEW: watering animation
   servoUsPerStep = 30;                     // fast: ~1500 us/s
   wiggleLow = SERVO_MIN_LIMIT;
   wiggleHigh = SERVO_MAX_LIMIT;
@@ -243,156 +248,43 @@ int moodToServo() {
 
 // ================= FACE =================
 // Which face should we show right now? 0=happy 1=okay 2=sad 3=thirsty 4=dizzy
+
 int chooseFace() {
   if (millis() < dizzyUntil) return 4;
   if (millis() < reactUntil) return 0;
   if (millis() - lastWatered > WATER_INTERVAL) return 3;
-  if (mood >= 70) return 0;
-  if (mood >= 40) return 1;
+  if (lastLux < LIGHT_DARK) return 5;
+
+  if (mood >= 70) return 1;
+  if (mood >= 40) return 6;
+
   return 2;
 }
 
 
+
+
 void drawFace(int face) {
-  display.clearScreen();
-
-  // ---------- GREEN LEAVES ----------
-  // Shared across all expressions.
-  display.drawRect(39, 5, 9, 4, true, 83, 220, 77);
-  display.drawRect(30, 7, 17, 5, true, 83, 220, 77);
-  display.drawRect(23, 10, 22, 5, true, 83, 220, 77);
-  display.drawRect(20, 14, 20, 4, true, 83, 220, 77);
-  display.drawRect(24, 18, 13, 3, true, 83, 220, 77);
-
-  display.drawRect(48, 5, 9, 4, true, 83, 220, 77);
-  display.drawRect(49, 7, 17, 5, true, 83, 220, 77);
-  display.drawRect(51, 10, 22, 5, true, 83, 220, 77);
-  display.drawRect(56, 14, 20, 4, true, 83, 220, 77);
-  display.drawRect(59, 18, 13, 3, true, 83, 220, 77);
-
-  // ---------- BLUSH ----------
-  // Dizzy uses cyan-blue; all other faces use pink.
-  if (face == 4) {
-    for (int i = 0; i < 3; i++) {
-      int x = 12 + i * 4;
-      int y = (i == 1) ? 43 : 41;
-      display.drawRect(x, y, 2, 7, true, 112, 211, 255);
-      display.drawRect(82 - i * 4, y, 2, 7, true, 112, 211, 255);
-    }
-  } else {
-    display.drawRect(11, 42, 11, 4, true, 255, 143, 177);
-    display.drawRect(13, 46, 7, 2, true, 255, 143, 177);
-    display.drawRect(74, 42, 11, 4, true, 255, 143, 177);
-    display.drawRect(76, 46, 7, 2, true, 255, 143, 177);
-  }
-
-  // ---------- EYES ----------
-  if (face == 0) {
-    // Happy: closed, upward-curved eyes.
-    display.drawLine(24, 32, 29, 26, 255, 255, 255);
-    display.drawLine(29, 26, 34, 32, 255, 255, 255);
-    display.drawLine(62, 32, 67, 26, 255, 255, 255);
-    display.drawLine(67, 26, 72, 32, 255, 255, 255);
-
-  } else if (face == 3) {
-    // Thirsty: tired, horizontal eyes.
-    display.drawRect(24, 31, 11, 3, true, 255, 255, 255);
-    display.drawRect(61, 31, 11, 3, true, 255, 255, 255);
-
-  } else if (face == 4) {
-    // Dizzy: two pixel-style spirals.
-    display.drawLine(23, 29, 23, 25, 255, 255, 255);
-    display.drawLine(23, 25, 28, 22, 255, 255, 255);
-    display.drawLine(28, 22, 34, 25, 255, 255, 255);
-    display.drawLine(34, 25, 34, 32, 255, 255, 255);
-    display.drawLine(34, 32, 27, 35, 255, 255, 255);
-    display.drawLine(27, 35, 26, 29, 255, 255, 255);
-    display.drawLine(26, 29, 30, 27, 255, 255, 255);
-
-    display.drawLine(61, 29, 61, 25, 255, 255, 255);
-    display.drawLine(61, 25, 66, 22, 255, 255, 255);
-    display.drawLine(66, 22, 72, 25, 255, 255, 255);
-    display.drawLine(72, 25, 72, 32, 255, 255, 255);
-    display.drawLine(72, 32, 65, 35, 255, 255, 255);
-    display.drawLine(65, 35, 64, 29, 255, 255, 255);
-    display.drawLine(64, 29, 68, 27, 255, 255, 255);
-
-  } else {
-    // Okay and Sad: upright white eyes.
-    display.drawRect(25, 25, 9, 12, true, 255, 255, 255);
-    display.drawRect(62, 25, 9, 12, true, 255, 255, 255);
-  }
-
-  // ---------- MOUTHS ----------
-  if (face == 0) {
-    // Happy: pink open smile.
-    display.drawRect(39, 43, 18, 5, true, 255, 150, 185);
-    display.drawRect(42, 48, 12, 4, true, 255, 150, 185);
-    display.drawRect(45, 52, 6, 2, true, 255, 150, 185);
-
-  } else if (face == 1) {
-    // Okay: small white smile.
-    display.drawLine(42, 44, 46, 48, 255, 255, 255);
-    display.drawLine(46, 48, 50, 48, 255, 255, 255);
-    display.drawLine(50, 48, 54, 44, 255, 255, 255);
-
-  } else if (face == 2) {
-    // Sad: downturned mouth.
-    display.drawLine(40, 51, 45, 46, 255, 255, 255);
-    display.drawLine(45, 46, 51, 46, 255, 255, 255);
-    display.drawLine(51, 46, 56, 51, 255, 255, 255);
-
-  } else if (face == 3) {
-    // Thirsty: small white frown.
-    display.drawLine(42, 49, 46, 45, 255, 255, 255);
-    display.drawLine(46, 45, 50, 45, 255, 255, 255);
-    display.drawLine(50, 45, 54, 49, 255, 255, 255);
-
-    // Small cyan water indicator.
-    display.drawRect(82, 23, 4, 5, true, 70, 190, 255);
-    display.drawRect(80, 28, 8, 5, true, 70, 190, 255);
-    display.drawRect(82, 33, 4, 2, true, 70, 190, 255);
-
-  } else if (face == 4) {
-    // Dizzy: connected ^^^ mouth.
-    display.drawLine(36, 50, 40, 45, 255, 255, 255);
-    display.drawLine(40, 45, 44, 50, 255, 255, 255);
-    display.drawLine(44, 50, 48, 45, 255, 255, 255);
-    display.drawLine(48, 45, 52, 50, 255, 255, 255);
-    display.drawLine(52, 50, 56, 45, 255, 255, 255);
-    display.drawLine(56, 45, 60, 50, 255, 255, 255);
-  }
+  auraDrawLegacyFace(face, false);
 }
+
 
 
 // Redraw only the eyes. Black rectangles erase the old eyes first.
 
+
 void drawEyes(bool open) {
-  // Do not alter special thirsty or dizzy eyes.
-  if (lastFace == 3 || lastFace == 4) return;
-
-  // Clear ONLY the eye regions.
-  display.drawRect(22, 22, 15, 17, true, 0, 0, 0);
-  display.drawRect(59, 22, 15, 17, true, 0, 0, 0);
-
-  if (!open || lastFace == 0) {
-    // Blink: both eyes become upward arches.
-    // Happy already uses these eyes.
-    display.drawLine(24, 32, 29, 26, 255, 255, 255);
-    display.drawLine(29, 26, 34, 32, 255, 255, 255);
-
-    display.drawLine(62, 32, 67, 26, 255, 255, 255);
-    display.drawLine(67, 26, 72, 32, 255, 255, 255);
-  } else {
-    // Restore the original rectangular eyes.
-    display.drawRect(25, 25, 9, 12, true, 255, 255, 255);
-    display.drawRect(62, 25, 9, 12, true, 255, 255, 255);
-  }
+  if (lastFace == 4) return;  // Dizzy keeps its spiral eyes
+  auraDrawLegacyFace(lastFace, !open);
 }
 
 
+
+
 void updateBlink() {
-  if (lastFace == 3 || lastFace == 4) return;   // thirsty and dizzy faces have their own eyes
+  if (auraAnimationActive()) return;
+  if (lastFace == 4) return;
+
   unsigned long now = millis();
   if (!blinking && now > nextBlink) {
     blinking = true;
@@ -407,6 +299,8 @@ void updateBlink() {
 
 // Call every loop. Only redraws when the face changes.
 void updateFace() {
+  if (auraAnimationActive()) return;
+
   int f = chooseFace();
   if (f != lastFace) {
     lastFace = f;
@@ -597,6 +491,7 @@ void loop() {
   updateFace();
   updateBlink();
   updateAccel();
+  auraTick();  // NEW: update Aura Plant display animations
 
   // Wiggle: flip between two positions (fast and wide after watering, small otherwise)
   if (millis() < wiggleUntil) {
@@ -671,8 +566,21 @@ void loop() {
     SerialMonitorInterface.println(lux);
     bleSend("L:" + String(lux, 1) + "\n");
   }
+
   float lux = light_sensor.readAmbientLight();
+
+  static bool auraHadLuxSample = false;
+  float previousLux = lastLux;
   lastLux = lux;
+
+  if (auraHadLuxSample &&
+      previousLux < LIGHT_GOOD &&
+      lux >= LIGHT_GOOD) {
+    auraStartSunlight();
+  }
+
+  auraHadLuxSample = true;
+
 
   if (millis() - lastMoodSend > 5000) {
     lastMoodSend = millis();
