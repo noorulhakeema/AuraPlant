@@ -366,17 +366,30 @@ void drawFace(int face) {
 
 
 // Redraw only the eyes. Black rectangles erase the old eyes first.
+
 void drawEyes(bool open) {
-  display.drawRect(22, 12, 14, 18, true, 0, 0, 0);
-  display.drawRect(60, 12, 14, 18, true, 0, 0, 0);
-  if (open) {
-    display.drawRect(24, 14, 10, 14, true, 255, 255, 255);
-    display.drawRect(62, 14, 10, 14, true, 255, 255, 255);
+  // Do not alter special thirsty or dizzy eyes.
+  if (lastFace == 3 || lastFace == 4) return;
+
+  // Clear ONLY the eye regions.
+  display.drawRect(22, 22, 15, 17, true, 0, 0, 0);
+  display.drawRect(59, 22, 15, 17, true, 0, 0, 0);
+
+  if (!open || lastFace == 0) {
+    // Blink: both eyes become upward arches.
+    // Happy already uses these eyes.
+    display.drawLine(24, 32, 29, 26, 255, 255, 255);
+    display.drawLine(29, 26, 34, 32, 255, 255, 255);
+
+    display.drawLine(62, 32, 67, 26, 255, 255, 255);
+    display.drawLine(67, 26, 72, 32, 255, 255, 255);
   } else {
-    display.drawLine(24, 21, 34, 21, 255, 255, 255);
-    display.drawLine(62, 21, 72, 21, 255, 255, 255);
+    // Restore the original rectangular eyes.
+    display.drawRect(25, 25, 9, 12, true, 255, 255, 255);
+    display.drawRect(62, 25, 9, 12, true, 255, 255, 255);
   }
 }
+
 
 void updateBlink() {
   if (lastFace == 3 || lastFace == 4) return;   // thirsty and dizzy faces have their own eyes
