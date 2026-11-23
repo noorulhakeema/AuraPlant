@@ -1,4 +1,4 @@
-// AuraPlant Core: Audio DSP + Light + Non-Blocking Servo + Phone BLE Bridge + Accelerometer
+// AuraPlant Core: Light + Smooth S-Curve Servo + Phone BLE Bridge + Accelerometer
 #include <SPI.h>
 #include <STBLE.h>
 #include <Wire.h>
@@ -30,9 +30,9 @@ int upX = 0, upY = 0, upZ = 0;     // reading when upright
 int freefallCount = 0;
 unsigned long tippedSince = 0;
 bool fellOver = false;
-const long ONE_G = 256;            // about 256 counts per g at the 2g range; check by printing at rest
-const int SPIKE_DELTA = 60;     // change between readings that counts as a bump (tune this)
-const bool DEBUG_ACCEL = true;  // prints deltas so you can tune; set false later
+const long ONE_G = 256;            // about 256 counts per g at the 2g range
+const int SPIKE_DELTA = 60;        // change between readings that counts as a bump
+const bool DEBUG_ACCEL = true;     // prints deltas so you can tune; set false later
 
 // ---- BLE ----
 uint8_t ble_rx_buffer[21];
@@ -40,54 +40,12 @@ uint8_t ble_rx_buffer_len = 0;
 uint8_t ble_connection_state = false;
 #define PIPE_UART_OVER_BTLE_UART_TX_TX 0
 
-// ---- Mic ----
-#define MIC_PIN A1
-#define MIC_PORT 1
-
-// ---- Voice / timing settings ----
-const float TALK_MARGIN = 2.5f;
-float loudSmooth = 0.0f;
+// ---- Light & Display ----
 const unsigned long LIGHT_INTERVAL = 5000;
-const bool DEBUG_LOUDNESS = false;          // set false for a quiet Serial Monitor
-const unsigned long TALK_COOLDOWN = 3500;
-unsigned long lastTalkTime = 0;
-const float MAX_GOOD_BASELINE = 5.0f;
-
 TSL2572 light_sensor;
 TinyScreen display = TinyScreen(TinyScreenPlus);
-int lastFace = -1;                                 // remembers which face is showing
-float baseline = 2.5f;
-float talkThreshold = 3.7f;
-float talkScore = 0.0f;
+int lastFace = -1;                 // remembers which face is showing
 unsigned long lastLightRead = 0;
-
-// ---- Re-arm logic ----
-bool armed = true;
-unsigned long quietStart = 0;
-
-// ---- Servo ----
-const int SERVO_CHANNEL = 2;
-const int SERVO_REST  = 1200;
-const int SERVO_PERK  = 1500;
-const int SERVO_HAPPY = 1900;
-const unsigned long SERVO_STEP_MS = 20;
-const int SERVO_US_PER_STEP = 8;          // normal slow speed
-int servoUsPerStep = SERVO_US_PER_STEP;
-
-// Water wiggle range. Start here and widen in ~100 us steps only if nothing buzzes or hits a stop.
-const int SERVO_MIN_LIMIT = 900;
-const int SERVO_MAX_LIMIT = 2100;
-int wiggleLow = SERVO_PERK, wiggleHigh = SERVO_HAPPY;
-unsigned long wiggleHalfMs = 400;
-
-int servoPos    = SERVO_REST;
-int servoTarget = SERVO_REST;
-bool servoOk = false;
-unsigned long lastServoStep = 0;
-unsigned long lastServoMove = 0;
-unsigned long lastServoCmd  = 0;
-unsigned long servoRestAt   = 0;
-unsigned long wiggleUntil   = 0;
 
 // ---- Mood system ----
 float mood = 60.0f;                          // 0-100
@@ -97,14 +55,41 @@ unsigned long lastMoodSend = 2500;           // offset so it doesn't collide wit
 unsigned long lastWatered = 0;               // millis() when last watered
 
 const unsigned long WATER_INTERVAL = 20000;  // DEMO: 20 s (real plant: 3 days = 259200000)
-const float LIGHT_GOOD = 5.0f;               // placeholder, we'll tune it
-const float LIGHT_DARK = 0.5f;               // placeholder, we'll tune it
+const float LIGHT_GOOD = 5.0f;               // placeholder, tune to room lighting
+const float LIGHT_DARK = 0.5f;               // placeholder, tune to dark room
 
 // ---- Face / blink ----
 unsigned long reactUntil = 0;     // forces the happy face until this time
 unsigned long nextBlink = 4000;   // when the next blink starts
 unsigned long blinkEnd = 0;
 bool blinking = false;
+
+// ---- Smooth S-Curve Servo ----
+const int SERVO_CHANNEL   = 2;
+const int SERVO_REST      = 1200;
+const int SERVO_PERK      = 1500;
+const int SERVO_HAPPY     = 1900;
+const int SERVO_MIN_LIMIT = 900;
+const int SERVO_MAX_LIMIT = 2100;
+
+const unsigned long SERVO_STEP_MS = 20;   // 50 Hz update rate
+const int SERVO_DEADBAND_US       = 15;   // ignores tiny mood drift so it won't twitch
+
+int servoPos       = SERVO_REST;
+int servoStartPos  = SERVO_REST;
+int servoTarget    = SERVO_REST;
+unsigned long servoStartTime  = 0;
+unsigned long servoDurationMs = 1000;
+unsigned long lastServoStep   = 0;
+unsigned long lastServoMove   = 0;
+unsigned long lastServoCmd    = 0;
+unsigned long servoRestAt     = 0;
+unsigned long wiggleUntil     = 0;
+
+int wiggleLow  = SERVO_PERK;
+int wiggleHigh = SERVO_HAPPY;
+bool wiggleDir = true;
+bool servoOk   = false;
 
 // ================= SERVO =================
 void servoWrite(int us) {
@@ -113,25 +98,40 @@ void servoWrite(int us) {
   lastServoCmd = millis();
 }
 
-void servoGoTo(int us) { servoTarget = us; }
+// Move smoothly to 'us' over 'durationMs' milliseconds
+void servoGoTo(int us, unsigned long durationMs = 1200) {
+  us = constrain(us, SERVO_MIN_LIMIT, SERVO_MAX_LIMIT);
+  // Ignore tiny changes (like slow mood decay) so the servo doesn't jitter back and forth
+  if (abs(us - servoTarget) < SERVO_DEADBAND_US) return;
+
+  servoStartPos   = servoPos;
+  servoTarget     = us;
+  servoStartTime  = millis();
+  servoDurationMs = max(durationMs, 100UL);
+}
 
 void servoUpdate() {
   if (!servoOk) return;
   unsigned long now = millis();
 
   if (now - lastServoStep >= SERVO_STEP_MS) {
-    unsigned long steps = (now - lastServoStep) / SERVO_STEP_MS;
     lastServoStep = now;
+
     if (servoPos != servoTarget) {
-      int move = servoUsPerStep * (int)steps;
-      if (servoPos < servoTarget) servoPos = min(servoPos + move, servoTarget);
-      else                        servoPos = max(servoPos - move, servoTarget);
+      float t = (float)(now - servoStartTime) / (float)servoDurationMs;
+      if (t >= 1.0f) {
+        servoPos = servoTarget;
+      } else {
+        // Cubic S-curve: slow start, smooth cruise, soft landing
+        float ease = t * t * (3.0f - 2.0f * t);
+        servoPos = servoStartPos + (int)((servoTarget - servoStartPos) * ease);
+      }
       servoWrite(servoPos);
       lastServoMove = now;
     }
   }
 
-  // Keep-alive so the controller's failsafe (1000 ms) doesn't switch the PWM off
+  // Keep-alive so the controller's failsafe (1000 ms) doesn't switch PWM off
   if (now - lastServoCmd > 400) servoWrite(servoPos);
 }
 
@@ -143,70 +143,27 @@ void addMood(float amount) {
 }
 
 // ================= REACTIONS =================
-void reactPerk() {                         // small rise: "I heard you"
-  servoGoTo(SERVO_PERK);
-  servoRestAt = millis() + 2500;           // starts lowering after 2.5 s
+void reactPerk() {                         // gentle 1.0s rise, holds 2.5s
+  servoGoTo(SERVO_PERK, 1000);
+  servoRestAt = millis() + 3500;
   addMood(5);
 }
 
-void reactHappy() {                        // full rise: "that was kind!"
-  servoGoTo(SERVO_HAPPY);
-  servoRestAt = millis() + 4500;           // rises ~1.75 s, holds ~2.75 s, then lowers
+void reactHappy() {                        // graceful 1.6s full rise, holds 3.0s
+  servoGoTo(SERVO_HAPPY, 1600);
+  servoRestAt = millis() + 4600;
   addMood(15);
-  reactUntil = millis() + 3000;            // show the happy face for 3 s
+  reactUntil = millis() + 3000;
 }
 
-void reactWater() {                        // big fast sweep: "thank you for the water!"
-  servoUsPerStep = 30;                     // fast: ~1500 us/s
-  wiggleLow = SERVO_MIN_LIMIT;
-  wiggleHigh = SERVO_MAX_LIMIT;
-  wiggleHalfMs = 1000;                     // long enough to reach each end
-  wiggleUntil = millis() + 4000;           // about 4 sweeps
+void reactWater() {                        // smooth, wide celebratory sway
+  wiggleLow   = SERVO_MIN_LIMIT;
+  wiggleHigh  = SERVO_MAX_LIMIT;
+  wiggleUntil = millis() + 4500;
   servoRestAt = wiggleUntil;
-  reactUntil = wiggleUntil;                // happy face while it wiggles
-}
-
-// ================= MIC =================
-float readLoudness() {
-  const int N = 150;
-  int samples[N];
-  long sum = 0;
-  for (int i = 0; i < N; i++) {
-    samples[i] = analogRead(MIC_PIN);
-    sum += samples[i];
-    delayMicroseconds(400);
-  }
-  float mean = sum / (float)N;
-  float sq = 0;
-  for (int i = 0; i < N; i++) {
-    float d = samples[i] - mean;
-    sq += d * d;
-  }
-  return sqrt(sq / N);
-}
-
-void calibrate() {
-  SerialMonitorInterface.println("Calibrating... stay quiet for 3 s");
-  const int WINDOWS = 25;
-  float v[WINDOWS];
-  for (int i = 0; i < WINDOWS; i++) v[i] = readLoudness();
-
-  for (int i = 1; i < WINDOWS; i++) {
-    float key = v[i];
-    int j = i - 1;
-    while (j >= 0 && v[j] > key) { v[j + 1] = v[j]; j--; }
-    v[j + 1] = key;
-  }
-
-  float total = 0;
-  for (int i = 0; i < WINDOWS / 2; i++) total += v[i];
-  baseline = total / (WINDOWS / 2);
-  talkThreshold = baseline + TALK_MARGIN;
-
-  SerialMonitorInterface.print("Baseline: ");
-  SerialMonitorInterface.print(baseline);
-  SerialMonitorInterface.print("  Threshold: ");
-  SerialMonitorInterface.println(talkThreshold);
+  reactUntil  = wiggleUntil;
+  wiggleDir   = true;
+  servoGoTo(wiggleHigh, 900);              // first smooth sweep
 }
 
 void scanI2C(const char* label) {
@@ -334,6 +291,35 @@ void updateFace() {
   }
 }
 
+// ================= BLE =================
+void bleSend(String msg) {
+  if (!ble_connection_state) return;       // nobody connected, don't send
+  if (msg.length() > 19) msg = msg.substring(0, 19);
+  if (!lib_aci_send_data(PIPE_UART_OVER_BTLE_UART_TX_TX, (uint8_t*)msg.c_str(), msg.length())) {
+    SerialMonitorInterface.println(F("TX dropped!"));
+  }
+}
+
+void handleIncoming() {
+  if (!ble_rx_buffer_len) return;
+  ble_rx_buffer[ble_rx_buffer_len] = '\0';
+  String cmd = String((char*)ble_rx_buffer);
+  cmd.trim();
+  ble_rx_buffer_len = 0;
+
+  SerialMonitorInterface.print("Phone sent: ");
+  SerialMonitorInterface.println(cmd);
+
+  if (cmd == "A:1" || cmd == "R:HAPPY") reactHappy();   // kind word -> rise
+  else if (cmd == "R:PERK") reactPerk();
+  else if (cmd == "W:1") {
+    lastWatered = millis();
+    addMood(20);
+    reactWater();
+    SerialMonitorInterface.println("Watered!");
+  }
+}
+
 // ================= ACCELEROMETER =================
 void updateAccel() {
   if (!accelOk) return;
@@ -346,6 +332,11 @@ void updateAccel() {
   int delta = abs(ax - lastAx) + abs(ay - lastAy) + abs(az - lastAz);
   lastAx = ax; lastAy = ay; lastAz = az;
 
+  if (DEBUG_ACCEL && delta > 20) {
+    SerialMonitorInterface.print("Accel delta: ");
+    SerialMonitorInterface.println(delta);
+  }
+
   // ---- Free fall: total acceleration near 0 g for 2+ readings ----
   long mag2 = (long)ax * ax + (long)ay * ay + (long)az * az;
   if (mag2 < (ONE_G * 4 / 10) * (ONE_G * 4 / 10)) {      // below 0.4 g
@@ -354,7 +345,7 @@ void updateAccel() {
     if (freefallCount >= 2) {                            // fall just ended
       dizzyUntil = now + 4000;
       addMood(-20);
-      servoGoTo(SERVO_REST);
+      servoGoTo(SERVO_REST, 600);
       servoRestAt = now + 3000;
       accelLockUntil = now + 2500;                       // ignore the impact bounce
       SerialMonitorInterface.println("E:FALL");
@@ -386,14 +377,13 @@ void updateAccel() {
   if (now < accelLockUntil) { spikeCount = 0; return; }  // ignore the bounce and shake tail
 
   // Don't mistake the servo's own vibration for a touch
-  bool servoShaking = (now - lastServoMove < 200) || (now < wiggleUntil);
+  bool servoShaking = (now - lastServoMove < 250) || (now < wiggleUntil);
 
   // Count bumps in a burst
-if (delta > SPIKE_DELTA && !servoShaking) {
-      if (now - lastSpike > 600) spikeCount = 0;   // new burst
+  if (delta > SPIKE_DELTA && !servoShaking) {
+    if (now - lastSpike > 600) spikeCount = 0;           // new burst
     spikeCount++;
     lastSpike = now;
-    lastTalkTime = now;                          // taps are noisy: keep the mic from reacting
   }
 
   // Shake: several spikes close together
@@ -402,7 +392,7 @@ if (delta > SPIKE_DELTA && !servoShaking) {
     dizzyUntil = now + 3000;
     accelLockUntil = now + 2000;
     addMood(-10);
-    servoGoTo(SERVO_REST);
+    servoGoTo(SERVO_REST, 600);
     servoRestAt = now + 3000;
     SerialMonitorInterface.println("E:SHAKE");
     bleSend("E:SHAKE\n");
@@ -420,48 +410,16 @@ if (delta > SPIKE_DELTA && !servoShaking) {
   }
 }
 
-// ================= BLE =================
-void bleSend(String msg) {
-  if (!ble_connection_state) return;       // nobody connected, don't send
-  if (msg.length() > 19) msg = msg.substring(0, 19);
-  if (!lib_aci_send_data(PIPE_UART_OVER_BTLE_UART_TX_TX, (uint8_t*)msg.c_str(), msg.length())) {
-    SerialMonitorInterface.println(F("TX dropped!"));
-  }
-}
-
-void handleIncoming() {
-  if (!ble_rx_buffer_len) return;
-  ble_rx_buffer[ble_rx_buffer_len] = '\0';
-  String cmd = String((char*)ble_rx_buffer);
-  cmd.trim();
-  ble_rx_buffer_len = 0;
-
-  SerialMonitorInterface.print("Phone sent: ");
-  SerialMonitorInterface.println(cmd);
-
-  if (cmd == "A:1" || cmd == "R:HAPPY") reactHappy();   // kind word -> rise
-  else if (cmd == "R:PERK") reactPerk();
-  else if (cmd == "W:1") {
-    lastWatered = millis();
-    addMood(20);
-    reactWater();
-    SerialMonitorInterface.println("Watered!");
-  }
-}
-
 // ================= SETUP =================
 void setup() {
   SerialMonitorInterface.begin(115200);
   while (!SerialMonitorInterface && millis() < 3000);
 
-  analogReadResolution(12);
-
   Wire.begin();
   Wireling.begin();
-  Wireling.selectPort(MIC_PORT);
   light_sensor.init(GAIN_16X);
   display.begin();
-  display.setFlip(true);        // remove if the face is upside down
+  display.setFlip(false);           // flipped orientation
   display.setBrightness(10);
   accel.begin(BMA250_range_2g, BMA250_update_time_16ms);
   scanI2C("before servo");
@@ -490,22 +448,7 @@ void setup() {
     SerialMonitorInterface.println("Servo controller NOT detected!");
   }
 
-  drawFace(1);                  // show a neutral face while warming up
-
-  SerialMonitorInterface.println("Warming up mic (20 s), stay quiet...");
-  unsigned long warmStart = millis();
-  while (millis() - warmStart < 20000) {
-    readLoudness();
-    aci_loop();
-    servoUpdate();
-  }
-
-  for (int attempt = 0; attempt < 5; attempt++) {
-    calibrate();
-    if (baseline < MAX_GOOD_BASELINE) break;
-    SerialMonitorInterface.println("Baseline too high, retrying...");
-  }
-  loudSmooth = baseline;
+  drawFace(1);                      // start immediately in neutral face
 }
 
 // ================= LOOP =================
@@ -517,12 +460,17 @@ void loop() {
   updateBlink();
   updateAccel();
 
-  // Wiggle: flip between two positions (fast and wide after watering, small otherwise)
+  // Smooth wiggle: only reverses AFTER reaching each milestone cleanly
   if (millis() < wiggleUntil) {
-    servoGoTo(((millis() / wiggleHalfMs) % 2) ? wiggleHigh : wiggleLow);
-  } else if (servoUsPerStep != SERVO_US_PER_STEP) {
-    servoUsPerStep = SERVO_US_PER_STEP;      // back to normal speed
-    wiggleLow = SERVO_PERK; wiggleHigh = SERVO_HAPPY; wiggleHalfMs = 400;
+    if (servoPos == servoTarget) {         // wait until S-curve finishes decelerating
+      wiggleDir = !wiggleDir;
+      servoGoTo(wiggleDir ? wiggleHigh : wiggleLow, 900);
+    }
+  }
+
+  // After a reaction ends, glide smoothly to the height matching current mood
+  if (millis() > servoRestAt && millis() >= wiggleUntil) {
+    servoGoTo(moodToServo(), 1500);        // 1.5s gentle glide back
   }
 
   // Manual test keys from the Serial Monitor
@@ -533,65 +481,18 @@ void loop() {
     if (c == 'w') { SerialMonitorInterface.println("CMD w"); reactWater(); }
   }
 
-  float loud = readLoudness();
   aci_loop();
   handleIncoming();
 
-  loudSmooth = 0.3f * loudSmooth + 0.7f * loud;
-
-  if (loudSmooth < baseline) baseline = 0.95f * baseline + 0.05f * loudSmooth;
-  talkThreshold = baseline + TALK_MARGIN;
-
-  if (DEBUG_LOUDNESS) {
-    SerialMonitorInterface.print("M:");
-    SerialMonitorInterface.print(loud);
-    SerialMonitorInterface.print("  smooth:");
-    SerialMonitorInterface.print(loudSmooth);
-    SerialMonitorInterface.print("  thr:");
-    SerialMonitorInterface.println(talkThreshold);
-  }
-
-  bool inCooldown = (millis() - lastTalkTime < TALK_COOLDOWN);
-  bool plantBusy = (millis() - lastServoMove < 1500) || (millis() < servoRestAt);
-  // Re-arm only after 1.5 s of real quiet
-  if (loudSmooth < baseline + 1.0f) {
-    if (quietStart == 0) quietStart = millis();
-    if (millis() - quietStart > 1500) armed = true;
-  } else {
-    quietStart = 0;
-  }
-
-  if (armed && !plantBusy && !inCooldown && loudSmooth > talkThreshold) {
-    talkScore += 1.0f;
-  } else {
-    talkScore = 0.0f;
-  }
-
-  bool micOk = baseline < MAX_GOOD_BASELINE;
-
-  if (micOk && talkScore >= 2.0f) {
-    SerialMonitorInterface.println("E:TALK");
-    bleSend("E:TALK\n");
-    lastTalkTime = millis();
-    armed = false;                         // must hear quiet before the next trigger
-    talkScore = 0.0f;
-    reactPerk();
-  }
-
-  // After a reaction ends, settle at the height that matches the mood
-  if (millis() > servoRestAt && millis() >= wiggleUntil) {
-    servoGoTo(moodToServo());
-  }
+  float lux = light_sensor.readAmbientLight();
+  lastLux = lux;
 
   if (millis() - lastLightRead > LIGHT_INTERVAL) {
     lastLightRead = millis();
-    float lux = light_sensor.readAmbientLight();
     SerialMonitorInterface.print("L:");
     SerialMonitorInterface.println(lux);
     bleSend("L:" + String(lux, 1) + "\n");
   }
-  float lux = light_sensor.readAmbientLight();
-  lastLux = lux;
 
   if (millis() - lastMoodSend > 5000) {
     lastMoodSend = millis();
