@@ -1,3 +1,4 @@
+
 package com.example.auraplantapp
 
 import android.Manifest
@@ -35,6 +36,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -66,7 +68,6 @@ import kotlinx.coroutines.launch
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import androidx.compose.material3.Button
 import android.util.Log
 
 
@@ -91,8 +92,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraPlantRootScreen() {
 
-    var isDeviceConnected by remember { mutableStateOf(false) }
-    var notificationsEnabled by remember { mutableStateOf(true) }
+    var notificationsEnabled by remember {
+        mutableStateOf(true)
+    }
 
     val context = LocalContext.current
 
@@ -109,12 +111,12 @@ fun AuraPlantRootScreen() {
         mutableStateOf("")
     }
 
-// Ensure Bluetooth callbacks update Compose state on the main thread
+    // Ensure Bluetooth callbacks update Compose state on the main thread
     val mainHandler = remember {
         Handler(Looper.getMainLooper())
     }
 
-// Create Bluetooth manager
+    // Create Bluetooth manager
     val bluetoothManager = remember(context) {
 
         PlantBluetoothManager(
@@ -122,7 +124,7 @@ fun AuraPlantRootScreen() {
 
             onMessageReceived = { message ->
                 mainHandler.post {
-                    lastDeviceMessage = message
+                    lastDeviceMessage = message.trim()
 
                     Log.d("AuraPlant BLE", "Device says: $message")
                 }
@@ -141,6 +143,7 @@ fun AuraPlantRootScreen() {
         )
     }
 
+    // Bluetooth permission launcher
     val bluetoothPermissionLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -149,13 +152,10 @@ fun AuraPlantRootScreen() {
             val granted = permissions.values.all { it }
 
             if (granted) {
-
                 bluetoothManager.scanForPlant()
-
             } else {
-
-                bluetoothStatus =
-                    "Bluetooth permissions were denied."
+                bluetoothStatus = "Bluetooth permissions were denied."
+                isBluetoothReady = false
             }
         }
 
@@ -190,7 +190,6 @@ fun AuraPlantRootScreen() {
     }
 
     val dailyMotivationalQuote = randomQuotes[randomQuoteIndex]
-
 
     // Audio quote and speech transcript state
     val audioRecorder = remember {
@@ -227,7 +226,6 @@ fun AuraPlantRootScreen() {
         mutableStateOf("")
     }
 
-
     // Gemini AI state
     val emotionAnalyzer = remember {
         GeminiEmotionAnalyzer()
@@ -255,28 +253,24 @@ fun AuraPlantRootScreen() {
         mutableStateOf(false)
     }
 
-    // True from the moment the user presses Stop until the AI has responded
     var isPlantThinking by remember {
         mutableStateOf(false)
     }
 
-    // Animated "." / "." / "..." shown while the AI has not responded yet
     var dotCount by remember {
         mutableIntStateOf(1)
     }
 
     LaunchedEffect(isPlantThinking) {
         dotCount = 1
+
         while (isPlantThinking) {
             delay(400)
             dotCount = if (dotCount >= 3) 1 else dotCount + 1
         }
-
-
     }
 
-
-    // Send the completed transcript to Gemini
+    // Send completed transcript to Gemini
     fun analyzeCompletedQuote(finalTranscript: String) {
 
         if (finalTranscript.isBlank()) {
@@ -293,27 +287,22 @@ fun AuraPlantRootScreen() {
 
             try {
 
-                // Analyse the transcript using Gemini
                 val result = emotionAnalyzer.analyze(finalTranscript)
 
-                // Calculate the updated plant happiness and mood
                 val updatedState = PlantEmotionManager.applyAnalysis(
                     currentHappiness = plantHappiness,
                     analysis = result
                 )
 
-                // Update the plant's emotional state
                 plantHappiness = updatedState.happiness
                 plantMood = updatedState.mood
 
-                // Update the plant's actual facial expression
                 currentMood = when (updatedState.mood) {
                     "Sad" -> PlantMood.SAD
                     "Happy" -> PlantMood.HAPPY
                     else -> PlantMood.HAPPY
                 }
 
-                // Display Gemini's response
                 plantResponseText = result.plantResponse
 
                 quoteStatusText =
@@ -331,6 +320,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
+    // Request Bluetooth permissions and connect
     fun connectToPlant() {
 
         val requiredPermissions =
@@ -356,14 +346,30 @@ fun AuraPlantRootScreen() {
         }
 
         if (missingPermissions.isEmpty()) {
-
             bluetoothManager.scanForPlant()
-
         } else {
-
             bluetoothPermissionLauncher.launch(
                 missingPermissions.toTypedArray()
             )
+        }
+    }
+
+    // Send the watering command to the TinyCircuits board
+    fun waterPlant() {
+
+        if (!isBluetoothReady) {
+            bluetoothStatus = "Connect to your plant before watering."
+            return
+        }
+
+        // Firmware recognises W:1, not R:WATER
+        bluetoothManager.sendToPlant("W:1")
+
+        val nextWater = (waterLevel + 1).coerceAtMost(5)
+        waterLevel = nextWater
+
+        if (nextWater >= 4) {
+            currentMood = PlantMood.HAPPY
         }
     }
 
@@ -379,7 +385,6 @@ fun AuraPlantRootScreen() {
 
             onFinalResult = { finalText ->
 
-                // If the final result is empty, fall back to the last partial text
                 val combinedTranscript = listOf(
                     transcribedQuote,
                     finalText.ifBlank { partialQuote }
@@ -390,7 +395,6 @@ fun AuraPlantRootScreen() {
                 transcribedQuote = combinedTranscript
                 partialQuote = ""
 
-                // Only analyse after the user presses Stop
                 if (shouldAnalyzeAfterStop) {
                     shouldAnalyzeAfterStop = false
                     analyzeCompletedQuote(combinedTranscript)
@@ -427,24 +431,20 @@ fun AuraPlantRootScreen() {
         )
     }
 
-
     // Release resources when the screen is destroyed
     DisposableEffect(Unit) {
         onDispose {
             audioRecorder.releaseAll()
             speechTranscriber.release()
-
             bluetoothManager.disconnect()
         }
     }
-
 
     // Start or stop speech recognition
     fun toggleRecordingNow() {
 
         if (!isRecordingQuote) {
 
-            // Start a new speech session
             transcribedQuote = ""
             partialQuote = ""
             plantResponseText = ""
@@ -461,7 +461,6 @@ fun AuraPlantRootScreen() {
 
         } else {
 
-            // Stop speech recognition
             shouldAnalyzeAfterStop = true
 
             isRecordingQuote = false
@@ -471,7 +470,6 @@ fun AuraPlantRootScreen() {
 
             speechTranscriber.stopListening()
 
-            // Safety net: if Android never calls back, use what we have after 4s
             coroutineScope.launch {
                 delay(4000)
 
@@ -487,12 +485,12 @@ fun AuraPlantRootScreen() {
 
                     transcribedQuote = fallback
                     partialQuote = ""
+
                     analyzeCompletedQuote(fallback)
                 }
             }
         }
     }
-
 
     // Request microphone permission
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -506,7 +504,6 @@ fun AuraPlantRootScreen() {
                 "Microphone permission is required to record audio quotes."
         }
     }
-
 
     fun onMicButtonClick() {
 
@@ -524,7 +521,6 @@ fun AuraPlantRootScreen() {
         }
     }
 
-
     // Weekly mood tracking
     val weeklyMoods = listOf(
         DayMoodEntry("SUN", PlantMood.HAPPY),
@@ -535,7 +531,6 @@ fun AuraPlantRootScreen() {
         DayMoodEntry("FRI", PlantMood.THIRSTY),
         DayMoodEntry("SAT", currentMood)
     )
-
 
     // Main application layout
     Scaffold(
@@ -594,29 +589,14 @@ fun AuraPlantRootScreen() {
                 0 -> DashboardTabContent(
 
                     currentMood = currentMood,
-
                     waterLevel = waterLevel,
-
                     lightLevel = lightLevel,
-
                     bluetoothStatus = bluetoothStatus,
-
                     lastDeviceMessage = lastDeviceMessage,
-
                     isBluetoothReady = isBluetoothReady,
 
-                    onConnectToPlant = {
-                        connectToPlant()
-                    },
-
                     onWaterPlant = {
-                        bluetoothManager.sendToPlant("R:WATER")
-                        val nextWater = (waterLevel + 1).coerceAtMost(5)
-                        waterLevel = nextWater
-                        if (nextWater >= 4) {
-                            currentMood = PlantMood.HAPPY
-                        }
-
+                        waterPlant()
                     },
 
                     dailyMotivationalQuote = dailyMotivationalQuote,
@@ -654,18 +634,14 @@ fun AuraPlantRootScreen() {
                     },
 
                     hasAudioQuote = hasAudioQuote,
-
                     isPlayingAudio = isPlayingAudio,
 
                     onTogglePlayAudio = {
 
                         if (isPlayingAudio) {
-
                             audioRecorder.stopPlayback()
                             isPlayingAudio = false
-
                         } else {
-
                             val started = audioRecorder.playRecordedQuote {
                                 isPlayingAudio = false
                             }
@@ -679,12 +655,9 @@ fun AuraPlantRootScreen() {
                     onToggleMood = {
 
                         if (currentMood == PlantMood.SAD) {
-
                             currentMood = PlantMood.HAPPY
                             waterLevel = 5
-
                         } else {
-
                             currentMood = PlantMood.SAD
                             waterLevel = 2
                         }
@@ -699,10 +672,21 @@ fun AuraPlantRootScreen() {
 
                 3 -> AuraSettingsScreen(
                     deviceName = "TinyCircuits BLE Unit",
-                    isDeviceConnected = isDeviceConnected,
-                    onToggleDeviceConnection = { isDeviceConnected = !isDeviceConnected },
+                    isDeviceConnected = isBluetoothReady,
+
+                    onConnectToPlant = {
+                        connectToPlant()
+                    },
+
+                    onDisconnectFromPlant = {
+                        bluetoothManager.disconnect()
+                    },
+
                     notificationsEnabled = notificationsEnabled,
-                    onNotificationsEnabledChange = { notificationsEnabled = it }
+
+                    onNotificationsEnabledChange = {
+                        notificationsEnabled = it
+                    }
                 )
             }
         }
@@ -719,7 +703,6 @@ fun DashboardTabContent(
     bluetoothStatus: String,
     lastDeviceMessage: String,
     isBluetoothReady: Boolean,
-    onConnectToPlant: () -> Unit,
     onWaterPlant: () -> Unit,
     dailyMotivationalQuote: String,
     onRefreshQuote: () -> Unit,
@@ -737,7 +720,7 @@ fun DashboardTabContent(
             .verticalScroll(rememberScrollState())
     ) {
 
-        // Sage Green Top Header + Overlapping TinyScreenFace
+        // Header
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -796,8 +779,7 @@ fun DashboardTabContent(
             }
         }
 
-
-        // Main Body Cards
+        // Main body cards
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -808,14 +790,12 @@ fun DashboardTabContent(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // Weekly Mood Tracking
             DailyMoodCalendarCard(
                 title = "MOOD TRACKING",
                 entries = weeklyMoods
             )
 
-
-            // Card 1 - Randomised Motivational Quote
+            // Daily motivation
             Column(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -840,7 +820,6 @@ fun DashboardTabContent(
                             vertical = 0.dp
                         )
                     ) {
-
                         Text(
                             text = "↻ New Quote",
                             fontSize = 12.sp,
@@ -855,8 +834,7 @@ fun DashboardTabContent(
                 )
             }
 
-
-            // Card 2 - Audio Transcript and Playback
+            // Audio transcript and playback
             Column(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -876,21 +854,20 @@ fun DashboardTabContent(
                 )
             }
 
-            //Water Button
-
+            // Single Water Plant button
             WaterPlantButton(
                 waterLevel = waterLevel,
                 onWaterPlant = onWaterPlant
             )
 
-            // Bluetooth connection controls
+            // Bluetooth connection status
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
 
                 Text(
-                    text = "PLANT CONNECTION",
+                    text = "PLANT STATUS",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextDark
@@ -902,28 +879,7 @@ fun DashboardTabContent(
                     fontSize = 14.sp
                 )
 
-                // Connect button
-                OutlinedButton(
-                    onClick = onConnectToPlant,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Connect to Plant")
-                }
-
-                // Water button
-                Button(
-                    onClick = onWaterPlant,
-                    enabled = isBluetoothReady,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Water Plant")
-                }
-
-                // Display the latest message received
                 if (lastDeviceMessage.isNotBlank()) {
-
                     Text(
                         text = "Device says: $lastDeviceMessage",
                         color = TextDark,
@@ -932,12 +888,11 @@ fun DashboardTabContent(
                 }
             }
 
-            // Water and Light Status
+            // Water and light status
             StatusMetersCard(
                 lightLevel = lightLevel,
                 waterLevel = waterLevel
             )
-
 
             // Existing UI test button
             OutlinedButton(
@@ -972,7 +927,6 @@ fun MoodCalendarJournalScreen(
         )
     }
 
-    // Sample 28-day monthly mood log
     val monthlyEntries = remember(todayMood) {
 
         (1..28).map { day ->
@@ -990,7 +944,6 @@ fun MoodCalendarJournalScreen(
             )
         }
     }
-
 
     Column(
         modifier = Modifier
@@ -1014,11 +967,8 @@ fun MoodCalendarJournalScreen(
             onDayClick = { entry ->
 
                 val statusText = when (entry.mood) {
-
                     PlantMood.HAPPY -> "Happy & well-hydrated"
-
                     PlantMood.THIRSTY -> "Needed a bit more water"
-
                     PlantMood.SAD -> "Low moisture / needed attention"
                 }
 

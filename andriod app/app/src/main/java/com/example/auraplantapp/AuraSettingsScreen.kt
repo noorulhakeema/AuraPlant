@@ -23,10 +23,11 @@ import com.example.auraplantapp.ui.theme.*
 fun AuraSettingsScreen(
     deviceName: String = "TinyCircuits BLE Unit",
     isDeviceConnected: Boolean,
-    onToggleDeviceConnection: () -> Unit,
+    onConnectToPlant: () -> Unit,
+    onDisconnectFromPlant: () -> Unit,
     notificationsEnabled: Boolean,
     onNotificationsEnabledChange: (Boolean) -> Unit
-) {
+){
     val context = LocalContext.current
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
@@ -40,19 +41,6 @@ fun AuraSettingsScreen(
             "Notification permission was denied."
         }
     }
-
-    val blePermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val anyGranted = results.values.any { it }
-        if (anyGranted) {
-            onToggleDeviceConnection()
-            statusMessage = "Bluetooth permissions granted. Updated device state."
-        } else {
-            statusMessage = "Bluetooth permissions needed to scan or connect."
-        }
-    }
-
     LaunchedEffect(Unit) {
         AuraNotificationHelper.ensureChannelCreated(context)
     }
@@ -111,20 +99,12 @@ fun AuraSettingsScreen(
 
                     Button(
                         onClick = {
-                            if (!isDeviceConnected && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                blePermissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.BLUETOOTH_SCAN,
-                                        Manifest.permission.BLUETOOTH_CONNECT
-                                    )
-                                )
+                            if (isDeviceConnected) {
+                                onDisconnectFromPlant()
+                                statusMessage = "Disconnected from $deviceName"
                             } else {
-                                onToggleDeviceConnection()
-                                statusMessage = if (!isDeviceConnected) {
-                                    "Connected to $deviceName (mock state)"
-                                } else {
-                                    "Disconnected from $deviceName"
-                                }
+                                onConnectToPlant()
+                                statusMessage = "Searching for $deviceName..."
                             }
                         },
                         shape = RoundedCornerShape(12.dp),
@@ -135,6 +115,16 @@ fun AuraSettingsScreen(
                     ) {
                         Text(if (isDeviceConnected) "Disconnect" else "Connect")
                     }
+
+
+                }
+                if (statusMessage != null) {
+                    Text(
+                        text = statusMessage!!,
+                        fontSize = 12.sp,
+                        color = SageHeader,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
@@ -237,14 +227,7 @@ fun AuraSettingsScreen(
                     )
                 }
 
-                if (statusMessage != null) {
-                    Text(
-                        text = statusMessage!!,
-                        fontSize = 12.sp,
-                        color = SageHeader,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+
             }
         }
     }

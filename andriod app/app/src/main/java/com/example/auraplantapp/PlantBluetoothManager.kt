@@ -1,8 +1,19 @@
+
 package com.example.auraplantapp
 
 import android.annotation.SuppressLint
-import android.bluetooth.*
-import android.bluetooth.le.*
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
 import android.util.Log
@@ -15,17 +26,20 @@ class PlantBluetoothManager(
 ) {
 
     private val bluetoothManager =
-        context.getSystemService(Context.BLUETOOTH_SERVICE)
-                as BluetoothManager
+        context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
 
     private val adapter = bluetoothManager.adapter
-    private val scanner = adapter.bluetoothLeScanner
+    private val scanner = adapter?.bluetoothLeScanner
 
     private var bluetoothGatt: BluetoothGatt? = null
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
     private var txCharacteristic: BluetoothGattCharacteristic? = null
 
+    private var isScanning = false
+
     companion object {
+        private const val TAG = "AuraPlantBLE"
+
         val SERVICE_UUID: UUID =
             UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
 
@@ -34,38 +48,92 @@ class PlantBluetoothManager(
 
         val TX_UUID: UUID =
             UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
+
+        private val CCCD_UUID: UUID =
+            UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 
-    // STEP 1: Scan for BLE devices
+    // STEP 1: Scan specifically for the TinyCircuits board
     @SuppressLint("MissingPermission")
     fun scanForPlant() {
 
-        onStatusChanged("Scanning for plant...")
+        if (bluetoothGatt != null) {
+            onStatusChanged("Already connected or connecting")
+            return
+        }
 
-        scanner?.startScan(object : ScanCallback() {
+        if (isScanning) {
+            onStatusChanged("Already scanning...")
+            return
+        }
 
-            override fun onScanResult(
-                callbackType: Int,
-                result: ScanResult
-            ) {
-                val device = result.device
+        val bleScanner = scanner
 
-                onStatusChanged(
-                    "Found device: ${device.name ?: device.address}"
-                )
+        if (bleScanner == null) {
+            onStatusChanged("Bluetooth scanner unavailable")
+            return
+        }
 
-                scanner.stopScan(this)
+        try {
+            val filter = ScanFilter.Builder()
+                .setDeviceName("BlueNRG")
+                .build()
 
-                connectToPlant(device)
-            }
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build()
 
-            override fun onScanFailed(errorCode: Int) {
-                onStatusChanged("Scan failed: $errorCode")
-            }
-        })
+            isScanning = true
+            onStatusChanged("Searching for TinyCircuits...")
+
+            bleScanner.startScan(
+                listOf(filter),
+                settings,
+                scanCallback
+            )
+
+        } catch (e: Exception) {
+            isScanning = false
+            Log.e(TAG, "Scan error", e)
+            onStatusChanged("Scan error: ${e.message}")
+        }
     }
 
-    // STEP 2: Connect to the BLE device
+    private val scanCallback = object : ScanCallback() {
+
+        @SuppressLint("MissingPermission")
+        override fun onScanResult(
+            callbackType: Int,
+            result: ScanResult
+        ) {
+            val device = result.device
+
+            val deviceName =
+                result.scanRecord?.deviceName ?: device.name
+
+            Log.d(TAG, "Found BLE device: $deviceName")
+
+            // Ignore devices that are not our TinyCircuits board
+            if (deviceName != "BlueNRG") {
+                return
+            }
+
+            scanner?.stopScan(this)
+            isScanning = false
+
+            onStatusChanged("Found TinyCircuits! Connecting...")
+
+            connectToPlant(device)
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            isScanning = false
+            Log.e(TAG, "Scan failed: $errorCode")
+            onStatusChanged("Scan failed: $errorCode")
+        }
+    }
+
+    // STEP 2: Connect to the TinyCircuits board
     @SuppressLint("MissingPermission")
     private fun connectToPlant(device: BluetoothDevice) {
 
@@ -78,7 +146,7 @@ class PlantBluetoothManager(
         )
     }
 
-    // STEP 3: Handle connection and incoming data
+    // STEP 3: Handle connection and BLE data
     private val gattCallback = object : BluetoothGattCallback() {
 
         @SuppressLint("MissingPermission")
@@ -87,21 +155,28 @@ class PlantBluetoothManager(
             status: Int,
             newState: Int
         ) {
+
             if (status == BluetoothGatt.GATT_SUCCESS &&
                 newState == BluetoothProfile.STATE_CONNECTED
             ) {
-
+                Log.d(TAG, "Connected. Discovering services...")
                 onStatusChanged("Connected! Discovering services...")
 
                 gatt.discoverServices()
 
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
 
-                onStatusChanged("Disconnected")
+                Log.d(TAG, "Disconnected. GATT status: $status")
 
                 rxCharacteristic = null
                 txCharacteristic = null
+
+                if (bluetoothGatt == gatt) {
+                    bluetoothGatt = null
+                }
+
                 gatt.close()
+                onStatusChanged("Disconnected")
             }
         }
 
@@ -110,54 +185,53 @@ class PlantBluetoothManager(
             gatt: BluetoothGatt,
             status: Int
         ) {
+
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 onStatusChanged("Service discovery failed")
                 return
             }
 
-            val service = gatt.getService(SERVICE_UUID)
-            Log.d("AuraPlantBLE", "========== DISCOVERED SERVICES ==========")
+            Log.d(TAG, "========== DISCOVERED SERVICES ==========")
 
             for (service in gatt.services) {
-                Log.d("AuraPlantBLE", "SERVICE: ${service.uuid}")
+                Log.d(TAG, "SERVICE: ${service.uuid}")
 
                 for (characteristic in service.characteristics) {
-                    Log.d(
-                        "AuraPlantBLE",
-                        "CHARACTERISTIC: ${characteristic.uuid}"
-                    )
+                    Log.d(TAG, "CHARACTERISTIC: ${characteristic.uuid}")
                 }
             }
 
-            Log.d("AuraPlantBLE", "=========================================")
+            Log.d(TAG, "=========================================")
+
+            val service = gatt.getService(SERVICE_UUID)
+
             if (service == null) {
+                Log.e(TAG, "Expected UART service not found")
                 onStatusChanged("BLE service not found")
                 return
             }
 
-            rxCharacteristic =
-                service.getCharacteristic(RX_UUID)
-
-            txCharacteristic =
-                service.getCharacteristic(TX_UUID)
+            rxCharacteristic = service.getCharacteristic(RX_UUID)
+            txCharacteristic = service.getCharacteristic(TX_UUID)
 
             if (rxCharacteristic == null || txCharacteristic == null) {
                 onStatusChanged("BLE characteristics not found")
                 return
             }
 
-            // Enable notifications
-            gatt.setCharacteristicNotification(
+            // Enable notifications so the phone can receive board messages
+            val notificationEnabled = gatt.setCharacteristicNotification(
                 txCharacteristic,
                 true
             )
 
+            if (!notificationEnabled) {
+                onStatusChanged("Could not enable notifications")
+                return
+            }
+
             val descriptor = txCharacteristic!!
-                .getDescriptor(
-                    UUID.fromString(
-                        "00002902-0000-1000-8000-00805f9b34fb"
-                    )
-                )
+                .getDescriptor(CCCD_UUID)
 
             if (descriptor == null) {
                 onStatusChanged("Notification descriptor not found")
@@ -165,6 +239,7 @@ class PlantBluetoothManager(
             }
 
             if (Build.VERSION.SDK_INT >= 33) {
+
                 val result = gatt.writeDescriptor(
                     descriptor,
                     BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
@@ -173,13 +248,19 @@ class PlantBluetoothManager(
                 if (result != BluetoothStatusCodes.SUCCESS) {
                     onStatusChanged("Failed to enable notifications")
                 }
+
             } else {
+
                 @Suppress("DEPRECATION")
                 descriptor.value =
                     BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
 
                 @Suppress("DEPRECATION")
-                gatt.writeDescriptor(descriptor)
+                val result = gatt.writeDescriptor(descriptor)
+
+                if (!result) {
+                    onStatusChanged("Failed to enable notifications")
+                }
             }
         }
 
@@ -188,41 +269,53 @@ class PlantBluetoothManager(
             descriptor: BluetoothGattDescriptor,
             status: Int
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                onStatusChanged("Connected and ready!")
-            } else {
-                onStatusChanged("Notification setup failed")
+
+            if (descriptor.uuid == CCCD_UUID) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    Log.d(TAG, "Notifications enabled")
+                    onStatusChanged("Connected and ready!")
+                } else {
+                    onStatusChanged("Notification setup failed")
+                }
             }
         }
 
+        // Android 13 and newer
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
+
             if (characteristic.uuid == TX_UUID) {
                 val message = value.toString(Charsets.UTF_8)
+
+                Log.d(TAG, "Received from plant: $message")
                 onMessageReceived(message)
             }
         }
 
+        // Android 12 and older
         @Deprecated("Deprecated on Android 13")
         override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
         ) {
+
             if (Build.VERSION.SDK_INT < 33 &&
                 characteristic.uuid == TX_UUID
             ) {
-                val message =
-                    characteristic.value?.toString(Charsets.UTF_8) ?: ""
+                @Suppress("DEPRECATION")
+                val message = characteristic.value
+                    ?.toString(Charsets.UTF_8) ?: ""
 
+                Log.d(TAG, "Received from plant: $message")
                 onMessageReceived(message)
             }
         }
     }
 
-    // STEP 4: Send a command to the plant
+    // STEP 4: Send commands to the plant
     @SuppressLint("MissingPermission")
     fun sendToPlant(command: String) {
 
@@ -236,32 +329,58 @@ class PlantBluetoothManager(
 
         val data = command.toByteArray(Charsets.UTF_8)
 
+        // Your firmware uses CHAR_PROP_WRITE_WITHOUT_RESP
         if (Build.VERSION.SDK_INT >= 33) {
+
             val result = gatt.writeCharacteristic(
                 characteristic,
                 data,
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             )
 
             if (result != BluetoothStatusCodes.SUCCESS) {
                 onStatusChanged("Failed to send command")
+            } else {
+                Log.d(TAG, "Sent to plant: $command")
             }
+
         } else {
+
             @Suppress("DEPRECATION")
             characteristic.value = data
 
             @Suppress("DEPRECATION")
             characteristic.writeType =
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
 
             @Suppress("DEPRECATION")
-            gatt.writeCharacteristic(characteristic)
+            val result = gatt.writeCharacteristic(characteristic)
+
+            if (!result) {
+                onStatusChanged("Failed to send command")
+            } else {
+                Log.d(TAG, "Sent to plant: $command")
+            }
         }
     }
 
     // STEP 5: Disconnect
     @SuppressLint("MissingPermission")
     fun disconnect() {
-        bluetoothGatt?.disconnect()
+
+        if (isScanning) {
+            scanner?.stopScan(scanCallback)
+            isScanning = false
+        }
+
+        val gatt = bluetoothGatt
+
+        if (gatt == null) {
+            onStatusChanged("Disconnected")
+            return
+        }
+
+        onStatusChanged("Disconnecting...")
+        gatt.disconnect()
     }
 }
