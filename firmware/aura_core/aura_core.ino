@@ -21,15 +21,15 @@ ServoDriver servo2(NO_R_REMOVED);
 // ================= TUNABLE VALUES (change live with "set name value") =================
 // Servo travel. Find YOUR real limits with the "g" command, then stay ~100 us inside them.
 int restUs      = 900;    // lowest (drooped)
-int happyUs     = 2100;   // highest (fully up)
+int happyUs     = 1850;   // highest (fully up)
 
 // WATER: rise to the top, stay 5 s, then glide down
-int waterUs     = 2100;
+int waterUs     = 1850;
 int waterRise   = 900;    // ms to reach the top
 int waterHold   = 5000;   // ms it stays at the top before coming down
 
 // COMPLIMENT: rise to the top FASTER and stay LONGER than water
-int compUs      = 2100;
+int compUs      = 1850;
 int compRise    = 400;
 int compHold    = 8000;
 int compStep    = 20;     // vitality gained per compliment (out of 100)
@@ -58,8 +58,8 @@ unsigned long CARE_GRACE     = 10000;
 float DECAY_NORMAL = 3.0f;
 float DECAY_BRIGHT = 1.0f;
 float DECAY_DARK   = 5.0f;
-float LIGHT_DARK   = 10.0f;
-float LIGHT_GOOD   = 50.0f;
+float LIGHT_DARK   = 0.0f;
+float LIGHT_GOOD   = 1.8f;
 
 const long ONE_G = 256;
 const int ACCEL_PRINT_FLOOR = 10;
@@ -261,7 +261,7 @@ void reactPat() {
   markInteraction();
   unsigned long now = millis();
   lastCare = now;
-  happyUntil = now + (unsigned long)patWigMs + 1500UL;
+  happyUntil = now +5000UL;
   auraStartExcited();
   if (now >= holdUntil) {                       // not while it is holding up from water/compliment
     int base = servoPos;
