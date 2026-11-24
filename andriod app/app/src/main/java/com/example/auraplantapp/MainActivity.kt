@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Favorite
 
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
@@ -44,7 +45,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Button
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -56,6 +60,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.collectAsState
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +68,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 import androidx.core.content.ContextCompat
 
@@ -73,13 +81,9 @@ import com.example.auraplantapp.ui.theme.TerracottaBox
 import com.example.auraplantapp.ui.theme.TextDark
 import com.example.auraplantapp.ui.theme.WarmCreamBg
 
-import com.google.firebase.Firebase
-import com.google.firebase.appcheck.appCheck
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
-import com.google.firebase.initialize
-
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -88,23 +92,12 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.layout.offset
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
+
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.material3.Surface
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.Canvas
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.layout.offset
+
 import java.util.Calendar
-import androidx.compose.runtime.collectAsState
 import java.time.LocalDate
 
 
@@ -114,21 +107,16 @@ enum class PlantInteractionEvent {
     PATTED
 }
 
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        Firebase.initialize(context = this)
+        // Firebase initialization and App Check removed.
 
-        Firebase.appCheck.installAppCheckProviderFactory(
-            DebugAppCheckProviderFactory.getInstance()
-        )
-
-        // Create notification channel
         PlantNotificationHelper.createChannel(this)
 
-        // Request notification permission on Android 13+
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -150,9 +138,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraPlantRootScreen() {
 
-
     val context = LocalContext.current
-
 
     val storedDailyState by dailyPlantState(context)
         .collectAsState(initial = null)
@@ -201,12 +187,18 @@ fun AuraPlantRootScreen() {
         mutableIntStateOf(50)
     }
 
+    var currentLux by remember {
+        mutableStateOf(0f)
+    }
+
+    var boardVitality by remember {
+        mutableIntStateOf(0)
+    }
 
     LaunchedEffect(storedDailyState) {
         val saved = storedDailyState ?: return@LaunchedEffect
 
         if (saved.date == today) {
-            // Same day: restore the previous session
             waterLevel = saved.waterLevel
             lightLevel = saved.lightLevel
             patCount = saved.patCount
@@ -217,7 +209,6 @@ fun AuraPlantRootScreen() {
             plantMood = saved.plantMood
             plantHappiness = saved.happiness
         } else {
-            // New day: reset daily values
             waterLevel = 2
             lightLevel = 4
             patCount = 0
@@ -286,8 +277,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-
-// Notification setting
+    // Notification settings
     var notificationsEnabled by remember {
         mutableStateOf(true)
     }
@@ -296,17 +286,16 @@ fun AuraPlantRootScreen() {
         notificationsEnabled
     )
 
-// Plant state
+    // Plant state
     var currentMood by remember {
         mutableStateOf(PlantMood.SAD)
     }
-
 
     var wateringCount by remember {
         mutableIntStateOf(0)
     }
 
-    // [ADDED] Drop & Pat interaction state
+    // Drop and pat interaction state
     var activeInteraction by remember {
         mutableStateOf(PlantInteractionEvent.NONE)
     }
@@ -315,13 +304,17 @@ fun AuraPlantRootScreen() {
         mutableStateOf<String?>(null)
     }
 
-    // Clear interaction alert
+    // Last message received from the plant
+    var lastDeviceMessage by remember {
+        mutableStateOf("")
+    }
+
     fun clearInteractionAlert() {
         activeInteraction = PlantInteractionEvent.NONE
         interactionAlertMessage = null
     }
 
-    // [ADDED] Auto-clear "pat pat" animation after 2.4 seconds
+    // Automatically clear pat animation
     LaunchedEffect(activeInteraction) {
         if (activeInteraction == PlantInteractionEvent.PATTED) {
             delay(2400)
@@ -333,40 +326,51 @@ fun AuraPlantRootScreen() {
         }
     }
 
-    // [ADDED] Handle drop and pat events from BLE or test triggers
+    // Handle hardware events
     fun handleHardwareInteraction(event: String) {
-        when (event.trim().uppercase()) {
 
-            "DROP", "DROPPED" -> {
+        val cleanEvent = event
+            .trim()
+            .uppercase()
+            .removePrefix("E:")
+            .trim()
+
+        when (cleanEvent) {
+
+            "DROP", "DROPPED", "TIPPED", "FALL" -> {
                 dropCount++
 
                 activeInteraction = PlantInteractionEvent.DROPPED
-                currentMood = PlantMood.SAD
+                plantMood = "Sad"
 
                 interactionAlertMessage =
-                    "Ouch! I'm hurt! Please help me!"
+                    "Your plant has fallen over! Please help it."
 
-                if (currentNotificationsEnabled) {
-                    AuraNotificationHelper.sendAlert(
-                        context = context,
-                        title = "AuraPlant Alert!",
-                        message = "Ouch! I'm hurt! Please help me!"
-                    )
-                }
+                lastDeviceMessage = "Plant has fallen over!"
             }
 
             "UPRIGHT", "NORMAL" -> {
                 activeInteraction = PlantInteractionEvent.NONE
                 interactionAlertMessage = null
-                currentMood = PlantMood.HAPPY
+
+                plantMood = "Happy"
+                lastDeviceMessage = "Plant is upright again!"
             }
 
             "PAT", "PATTED" -> {
                 patCount++
 
                 activeInteraction = PlantInteractionEvent.PATTED
-                currentMood = PlantMood.HAPPY
-                interactionAlertMessage = "pat pat"
+                plantMood = "Happy"
+
+                interactionAlertMessage =
+                    "Your plant says: pat pat! ♥"
+
+                lastDeviceMessage = "Plant was patted!"
+            }
+
+            "SHAKE" -> {
+                lastDeviceMessage = "Plant is shaking!"
             }
         }
     }
@@ -380,35 +384,75 @@ fun AuraPlantRootScreen() {
         mutableStateOf(false)
     }
 
-    var lastDeviceMessage by remember {
-        mutableStateOf("")
-    }
-
-    // Ensure Bluetooth callbacks update Compose state on the main thread
     val mainHandler = remember {
         Handler(Looper.getMainLooper())
     }
 
-    // Keep the latest interaction handler available to BLE callbacks
     val currentHardwareInteraction by rememberUpdatedState(
         ::handleHardwareInteraction
     )
 
-// Bluetooth manager
+    // Bluetooth manager
     val bluetoothManager = remember(context) {
         PlantBluetoothManager(
             context = context,
 
             onMessageReceived = { message ->
                 mainHandler.post {
-                    lastDeviceMessage = message.trim()
 
+                    val cleanMessage = message.trim()
 
-                    // Process hardware interaction messages from the TinyCircuits device.
-                    // handleHardwareInteraction() ignores messages other than DROP/DROPPED and PAT/PATTED.
-                    currentHardwareInteraction(message)
+                    lastDeviceMessage = cleanMessage
 
-                    Log.d("AuraPlant BLE", "Device says: $message")
+                    when {
+
+                        // Light sensor reading
+                        cleanMessage.startsWith("L:", ignoreCase = true) -> {
+
+                            val lux = cleanMessage
+                                .substringAfter(":")
+                                .toFloatOrNull()
+
+                            if (lux != null) {
+                                currentLux = lux
+
+                                lightLevel = when {
+                                    lux <= 0f -> 0
+                                    lux <= 0.35f -> 1
+                                    lux <= 0.8f -> 2
+                                    lux <= 1.3f -> 3
+                                    lux <= 1.8f -> 4
+                                    else -> 5
+                                }
+                            }
+                        }
+
+                        // Board vitality reading
+                        cleanMessage.startsWith("S:", ignoreCase = true) -> {
+
+                            val vitality = cleanMessage
+                                .substringAfter(":")
+                                .toIntOrNull()
+
+                            if (vitality != null) {
+                                boardVitality = vitality.coerceIn(0, 100)
+                            }
+                        }
+
+                        // Hardware events
+                        cleanMessage.startsWith("E:", ignoreCase = true) -> {
+                            currentHardwareInteraction(cleanMessage)
+                        }
+
+                        else -> {
+                            currentHardwareInteraction(cleanMessage)
+                        }
+                    }
+
+                    Log.d(
+                        "AuraPlant BLE",
+                        "Device says: $cleanMessage"
+                    )
                 }
             },
 
@@ -425,6 +469,7 @@ fun AuraPlantRootScreen() {
 
             onConnectionEvent = { connected ->
                 mainHandler.post {
+
                     if (currentNotificationsEnabled) {
                         PlantNotificationHelper.show(
                             context = context,
@@ -464,7 +509,6 @@ fun AuraPlantRootScreen() {
     var selectedTab by remember {
         mutableIntStateOf(0)
     }
-
 
     // Randomised motivational quotes
     val randomQuotes = remember {
@@ -510,7 +554,6 @@ fun AuraPlantRootScreen() {
         )
     }
 
-
     var partialQuote by remember {
         mutableStateOf("")
     }
@@ -530,12 +573,10 @@ fun AuraPlantRootScreen() {
         mutableStateOf(false)
     }
 
-    // True from the moment the user presses Stop until the AI has responded
     var isPlantThinking by remember {
         mutableStateOf(false)
     }
 
-    // Animated "." / "." / "..." shown while the AI has not responded yet
     var dotCount by remember {
         mutableIntStateOf(1)
     }
@@ -547,20 +588,13 @@ fun AuraPlantRootScreen() {
             delay(400)
             dotCount = if (dotCount >= 3) 1 else dotCount + 1
         }
-
-
-
-
     }
 
-    // FULL SCREEN DROP WARNING
+    // Full screen drop warning
     if (activeInteraction == PlantInteractionEvent.DROPPED) {
 
         Dialog(
-            onDismissRequest = {
-                // Prevent accidental dismissal.
-                // The alert clears when TinyCircuits reports UPRIGHT.
-            },
+            onDismissRequest = {},
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
                 dismissOnBackPress = false,
@@ -633,7 +667,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-    // Send the completed transcript to Gemini
+    // Send completed transcript to Gemini
     fun analyzeCompletedQuote(finalTranscript: String) {
 
         if (finalTranscript.isBlank()) {
@@ -651,18 +685,16 @@ fun AuraPlantRootScreen() {
         coroutineScope.launch {
 
             try {
-                // Analyse the transcript using Gemini
                 val result = emotionAnalyzer.analyze(finalTranscript)
-                // Calculate the updated plant happiness and mood
+
                 val updatedState = PlantEmotionManager.applyAnalysis(
                     currentHappiness = plantHappiness,
                     analysis = result
                 )
 
-                // Update the plant's emotional state
                 plantHappiness = updatedState.happiness
                 plantMood = updatedState.mood
-                // Update the plant's actual facial expression
+
                 currentMood = when (updatedState.mood) {
                     "Sad" -> PlantMood.SAD
                     "Happy" -> PlantMood.HAPPY
@@ -671,7 +703,6 @@ fun AuraPlantRootScreen() {
 
                 plantResponseText = result.plantResponse
 
-                // Display Gemini's response
                 quoteStatusText =
                     "AI analysis complete: ${result.sentiment}"
 
@@ -687,7 +718,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-    // Request Bluetooth permissions and connect
+    // Connect to plant
     fun connectToPlant() {
 
         val requiredPermissions =
@@ -722,21 +753,18 @@ fun AuraPlantRootScreen() {
     }
 
     // Water plant
-    fun waterPlant() {
+    fun waterPlant(): Boolean {
 
         if (!isBluetoothReady) {
-            bluetoothStatus = "Connect to your plant before watering."
-            return
+            return false
         }
 
         bluetoothManager.sendToPlant("W:1")
 
-        val nextWater = (waterLevel + 1).coerceAtMost(5)
-        waterLevel = nextWater
+        waterLevel = (waterLevel + 1).coerceAtMost(5)
+        plantMood = "Happy"
 
-        if (nextWater >= 4) {
-            currentMood = PlantMood.HAPPY
-        }
+        return true
     }
 
     // Speech-to-text transcriber
@@ -750,7 +778,7 @@ fun AuraPlantRootScreen() {
             },
 
             onFinalResult = { finalText ->
-                // If the final result is empty, fall back to the last partial text
+
                 val combinedTranscript = listOf(
                     transcribedQuote,
                     finalText.ifBlank { partialQuote }
@@ -761,7 +789,6 @@ fun AuraPlantRootScreen() {
                 transcribedQuote = combinedTranscript
                 partialQuote = ""
 
-                // Only analyse after the user presses Stop
                 if (shouldAnalyzeAfterStop) {
                     shouldAnalyzeAfterStop = false
                     analyzeCompletedQuote(combinedTranscript)
@@ -811,7 +838,7 @@ fun AuraPlantRootScreen() {
     fun toggleRecordingNow() {
 
         if (!isRecordingQuote) {
-            // Start a new speech session
+
             transcribedQuote = ""
             partialQuote = ""
             plantResponseText = ""
@@ -828,7 +855,6 @@ fun AuraPlantRootScreen() {
 
         } else {
 
-            // Stop speech recognition
             shouldAnalyzeAfterStop = true
 
             isRecordingQuote = false
@@ -837,7 +863,7 @@ fun AuraPlantRootScreen() {
             quoteStatusText = "Finishing transcription..."
 
             speechTranscriber.stopListening()
-            // Safety net: if Android never calls back, use what we have after 4s
+
             coroutineScope.launch {
                 delay(4000)
 
@@ -964,27 +990,27 @@ fun AuraPlantRootScreen() {
                     isBluetoothReady = isBluetoothReady,
                     activeInteraction = activeInteraction,
                     interactionAlertMessage = interactionAlertMessage,
-                    onSimulateDrop = { handleHardwareInteraction("DROP") },
-                    onSimulatePat = { handleHardwareInteraction("PAT") },
-                    onDismissAlert = { clearInteractionAlert() },
+
+                    onSimulateDrop = {
+                        handleHardwareInteraction("DROP")
+                    },
+
+                    onSimulatePat = {
+                        handleHardwareInteraction("PAT")
+                    },
+
+                    onDismissAlert = {
+                        clearInteractionAlert()
+                    },
 
                     onConnectToPlant = {
                         connectToPlant()
                     },
 
                     onWaterPlant = {
-                        bluetoothManager.sendToPlant("W:1")
-
-                        wateringCount++
-
-                        val nextWater = (waterLevel + 1).coerceAtMost(5)
-                        waterLevel = nextWater
-
-                        if (nextWater >= 4) {
-                            currentMood = PlantMood.HAPPY
+                        if (waterPlant()) {
+                            wateringCount++
                         }
-
-                        waterPlant()
                     },
 
                     dailyMotivationalQuote = dailyMotivationalQuote,
@@ -1050,8 +1076,7 @@ fun AuraPlantRootScreen() {
                             waterLevel = 2
                         }
                     }
-
-                    )
+                )
 
                 1 -> MoodCalendarJournalScreen(
                     todayMood = currentMood
@@ -1088,8 +1113,6 @@ fun AuraPlantRootScreen() {
         }
     }
 }
-
-
 
 
 // Dashboard screen
@@ -1181,16 +1204,15 @@ fun DashboardTabContent(
                 contentAlignment = Alignment.TopCenter
             ) {
                 TinyScreenFace(mood = currentMood)
+
                 PatHeartAnimationOverlay(
                     visible = activeInteraction == PlantInteractionEvent.PATTED,
-                    modifier = Modifier.offset(y = (105).dp)
+                    modifier = Modifier.offset(y = 105.dp)
                 )
             }
         }
 
-
-
-        // Main Body Cards
+        // Main body cards
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1200,30 +1222,44 @@ fun DashboardTabContent(
                 ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // [AMENDED START] Dismissible notification banner for drop alert or pat message
+
+            // Dismissible notification banner
             if (interactionAlertMessage != null) {
-                val isDrop = activeInteraction == PlantInteractionEvent.DROPPED
+
+                val isDrop =
+                    activeInteraction == PlantInteractionEvent.DROPPED
+
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(14.dp),
-                    color = if (isDrop) BarRed.copy(alpha = 0.14f) else SageHeader.copy(alpha = 0.18f),
+                    color = if (isDrop) {
+                        BarRed.copy(alpha = 0.14f)
+                    } else {
+                        SageHeader.copy(alpha = 0.18f)
+                    },
                     border = BorderStroke(
                         width = 1.5.dp,
                         color = if (isDrop) BarRed else SageHeader
                     )
                 ) {
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(
+                                horizontal = 14.dp,
+                                vertical = 10.dp
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+
                         Row(
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+
                             if (!isDrop) {
                                 Icon(
                                     imageVector = Icons.Default.Favorite,
@@ -1232,6 +1268,7 @@ fun DashboardTabContent(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
+
                             Text(
                                 text = interactionAlertMessage,
                                 fontSize = 15.sp,
@@ -1239,9 +1276,13 @@ fun DashboardTabContent(
                                 color = if (isDrop) BarRed else TextDark
                             )
                         }
+
                         TextButton(
                             onClick = onDismissAlert,
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            contentPadding = PaddingValues(
+                                horizontal = 8.dp,
+                                vertical = 0.dp
+                            )
                         ) {
                             Text(
                                 text = "✕",
@@ -1253,15 +1294,14 @@ fun DashboardTabContent(
                     }
                 }
             }
-            // [AMENDED END]
 
-            // Weekly Mood Tracking
+            // Weekly mood tracking
             DailyMoodCalendarCard(
                 title = "MOOD TRACKING",
                 entries = weeklyMoods
             )
 
-            // Card 1 - Randomised Motivational Quote
+            // Daily motivation
             Column(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1300,7 +1340,7 @@ fun DashboardTabContent(
                 )
             }
 
-            // Card 2 - Audio Transcript and Playback
+            // Audio transcript and playback
             Column(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1320,13 +1360,13 @@ fun DashboardTabContent(
                 )
             }
 
-            // Water Plant button
+            // Water plant button
             WaterPlantButton(
                 waterLevel = waterLevel,
                 onWaterPlant = onWaterPlant
             )
 
-            // Bluetooth connection status
+            // Bluetooth device message
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -1341,24 +1381,34 @@ fun DashboardTabContent(
                 }
             }
 
-            // Quick test buttons for Drop alert & Pat animation
+            // Quick test buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+
                 OutlinedButton(
                     onClick = onSimulateDrop,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Test Drop Alert", color = BarRed, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Test Drop Alert",
+                        color = BarRed,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
+
                 OutlinedButton(
                     onClick = onSimulatePat,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Test Pat ♥", color = SageHeader, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Test Pat ♥",
+                        color = SageHeader,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
 
@@ -1374,7 +1424,6 @@ fun DashboardTabContent(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             ) {
-
                 Text(
                     "Test UI State: Toggle Happy / Thirsty",
                     color = TextDark
@@ -1400,13 +1449,16 @@ fun MoodCalendarJournalScreen(
             "Tap any day on the calendar to inspect your plant's mood."
         )
     }
-    // Sample monthly mood log
+
     val monthlyEntries = remember(todayMood) {
+
         val calendar = Calendar.getInstance()
 
-        val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
+        val daysInMonth =
+            calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
 
         (1..daysInMonth).map { day ->
+
             val mood = when {
                 day == calendar.get(Calendar.DAY_OF_MONTH) -> todayMood
                 day % 6 == 0 -> PlantMood.SAD
@@ -1420,7 +1472,6 @@ fun MoodCalendarJournalScreen(
             )
         }
     }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1460,7 +1511,7 @@ fun MoodCalendarJournalScreen(
 }
 
 
-// Placeholder Screens
+// Placeholder screen
 @Composable
 fun PlaceholderScreen(title: String) {
 
@@ -1478,14 +1529,17 @@ fun PlaceholderScreen(title: String) {
     }
 }
 
-//Patpat Feature
 
+// Pat Pat Feature
 @Composable
 fun PatHeartAnimationOverlay(
     visible: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "patHeartTransition")
+
+    val infiniteTransition =
+        rememberInfiniteTransition(label = "patHeartTransition")
+
     val heartScale by infiniteTransition.animateFloat(
         initialValue = 0.9f,
         targetValue = 1.22f,
@@ -1495,9 +1549,10 @@ fun PatHeartAnimationOverlay(
         ),
         label = "heartScale"
     )
+
     val floatOffset by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = (-10f),
+        targetValue = -10f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 450),
             repeatMode = RepeatMode.Reverse
@@ -1511,22 +1566,29 @@ fun PatHeartAnimationOverlay(
         exit = fadeOut(animationSpec = tween(300)),
         modifier = modifier
     ) {
+
         Surface(
             shape = RoundedCornerShape(20.dp),
             color = CardSurface,
             border = BorderStroke(1.5.dp, TerracottaBox)
         ) {
+
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.padding(
+                    horizontal = 14.dp,
+                    vertical = 8.dp
+                ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+
                 Icon(
                     imageVector = Icons.Default.Favorite,
                     contentDescription = "Loved Heart",
                     tint = BarRed,
                     modifier = Modifier.size(28.dp)
                 )
+
                 Text(
                     text = "pat pat",
                     fontSize = 16.sp,
@@ -1539,7 +1601,7 @@ fun PatHeartAnimationOverlay(
 }
 
 
-
+// Plant Insights Screen
 @Composable
 fun PlantInsightsScreen(
     patCount: Int,
@@ -1549,9 +1611,10 @@ fun PlantInsightsScreen(
     currentWaterLevel: Int,
     currentLightLevel: Int
 ) {
-    // EXAMPLE DATA ONLY.
-    // Replace these lists with actual saved sensor readings later.
-    val days = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+    val days = listOf(
+        "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+    )
 
     val lightHistory = listOf(3, 4, 3, 2, 4, 5, 4)
     val waterHistory = listOf(4, 3, 3, 2, 4, 5, 4)
@@ -1565,7 +1628,6 @@ fun PlantInsightsScreen(
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
 
-        // PAGE TITLE
         Text(
             text = "Plant Insights",
             fontSize = 26.sp,
@@ -1579,7 +1641,7 @@ fun PlantInsightsScreen(
             color = Color.Gray
         )
 
-        // 1. PLANT CARE ACTIVITY
+        // Plant care activity
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
@@ -1587,10 +1649,12 @@ fun PlantInsightsScreen(
             ),
             shape = RoundedCornerShape(18.dp)
         ) {
+
             Column(
                 modifier = Modifier.padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
+
                 Text(
                     text = "Plant Care Activity",
                     fontSize = 18.sp,
@@ -1598,18 +1662,20 @@ fun PlantInsightsScreen(
                     color = Color(0xFF405B46)
                 )
 
-                // Pat Activities and Drop Incidents
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+
                     Column(modifier = Modifier.weight(1f)) {
+
                         Text(
                             text = patCount.toString(),
                             fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF405B46)
                         )
+
                         Text(
                             text = "Pat Activities",
                             fontSize = 13.sp,
@@ -1618,12 +1684,14 @@ fun PlantInsightsScreen(
                     }
 
                     Column(modifier = Modifier.weight(1f)) {
+
                         Text(
                             text = dropCount.toString(),
                             fontSize = 30.sp,
                             fontWeight = FontWeight.Bold,
                             color = BarRed
                         )
+
                         Text(
                             text = "Drop Incidents",
                             fontSize = 13.sp,
@@ -1632,16 +1700,19 @@ fun PlantInsightsScreen(
                     }
                 }
 
-                HorizontalDivider(color = Color(0xFFEAEDE7))
+                HorizontalDivider(
+                    color = Color(0xFFEAEDE7)
+                )
 
-                // Words of Affirmation
                 Column {
+
                     Text(
                         text = affirmationCount.toString(),
                         fontSize = 30.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFF405B46)
                     )
+
                     Text(
                         text = "Words of Affirmation",
                         fontSize = 13.sp,
@@ -1651,7 +1722,7 @@ fun PlantInsightsScreen(
             }
         }
 
-        // 2. LIGHT SENSOR HISTORY
+        // Light sensor history
         SensorHistoryCard(
             title = "Light Sensor History",
             subtitle = "Weekly light level readings",
@@ -1661,7 +1732,7 @@ fun PlantInsightsScreen(
             lineColor = Color(0xFFE3A83B)
         )
 
-        // 3. WATER SENSOR HISTORY
+        // Water sensor history
         SensorHistoryCard(
             title = "Water Sensor History",
             subtitle = "Weekly water level readings",
@@ -1671,7 +1742,6 @@ fun PlantInsightsScreen(
             lineColor = Color(0xFF2875BD)
         )
 
-        // DATA DISCLAIMER
         Text(
             text = "Note: Weekly graph readings are illustrative sample data. " +
                     "Current readings use the values currently available in the app.",
@@ -1682,6 +1752,7 @@ fun PlantInsightsScreen(
 }
 
 
+// Sensor History Card
 @Composable
 fun SensorHistoryCard(
     title: String,
@@ -1691,6 +1762,7 @@ fun SensorHistoryCard(
     currentReading: Int,
     lineColor: Color
 ) {
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -1698,12 +1770,12 @@ fun SensorHistoryCard(
         ),
         shape = RoundedCornerShape(18.dp)
     ) {
+
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
 
-            // TITLE
             Text(
                 text = title,
                 fontSize = 18.sp,
@@ -1717,7 +1789,6 @@ fun SensorHistoryCard(
                 color = Color.Gray
             )
 
-            // CURRENT READING
             Text(
                 text = "Current reading",
                 fontSize = 13.sp,
@@ -1731,17 +1802,16 @@ fun SensorHistoryCard(
                 color = lineColor
             )
 
-            // LINE GRAPH
             SensorLineGraph(
                 readings = readings,
                 lineColor = lineColor
             )
 
-            // DAY LABELS
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
+
                 days.forEach { day ->
                     Text(
                         text = day,
@@ -1755,7 +1825,6 @@ fun SensorHistoryCard(
                 color = Color(0xFFEAEAEA)
             )
 
-            // DAILY NUMERICAL READINGS
             Text(
                 text = "Daily Readings",
                 fontSize = 14.sp,
@@ -1764,10 +1833,12 @@ fun SensorHistoryCard(
             )
 
             days.zip(readings).forEach { (day, reading) ->
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+
                     Text(
                         text = day,
                         fontSize = 13.sp,
@@ -1787,16 +1858,19 @@ fun SensorHistoryCard(
 }
 
 
+// Sensor Line Graph
 @Composable
 fun SensorLineGraph(
     readings: List<Int>,
     lineColor: Color
 ) {
+
     Canvas(
         modifier = Modifier
             .fillMaxWidth()
             .height(170.dp)
     ) {
+
         if (readings.size < 2) return@Canvas
 
         val leftPadding = 12.dp.toPx()
@@ -1804,11 +1878,15 @@ fun SensorLineGraph(
         val topPadding = 12.dp.toPx()
         val bottomPadding = 12.dp.toPx()
 
-        val graphWidth = size.width - leftPadding - rightPadding
-        val graphHeight = size.height - topPadding - bottomPadding
+        val graphWidth =
+            size.width - leftPadding - rightPadding
 
-        // Horizontal grid lines for levels 0 to 5
+        val graphHeight =
+            size.height - topPadding - bottomPadding
+
+        // Horizontal grid lines
         for (level in 0..5) {
+
             val y = topPadding +
                     graphHeight * (5 - level) / 5f
 
@@ -1826,8 +1904,9 @@ fun SensorLineGraph(
             )
         }
 
-        // Convert each reading into a graph coordinate
+        // Convert readings into graph coordinates
         val points = readings.mapIndexed { index, value ->
+
             val x = leftPadding +
                     graphWidth * index / (readings.size - 1).toFloat()
 
@@ -1837,8 +1916,9 @@ fun SensorLineGraph(
             androidx.compose.ui.geometry.Offset(x, y)
         }
 
-        // Draw connecting lines
+        // Connecting lines
         for (index in 0 until points.size - 1) {
+
             drawLine(
                 color = lineColor,
                 start = points[index],
@@ -1847,8 +1927,9 @@ fun SensorLineGraph(
             )
         }
 
-        // Draw reading points
+        // Reading points
         points.forEach { point ->
+
             drawCircle(
                 color = Color.White,
                 radius = 6.dp.toPx(),
@@ -1863,12 +1944,3 @@ fun SensorLineGraph(
         }
     }
 }
-
-
-
-
-
-
-
-
-

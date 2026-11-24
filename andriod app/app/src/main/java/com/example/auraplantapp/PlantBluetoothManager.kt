@@ -31,6 +31,7 @@ class PlantBluetoothManager(
 
     private val adapter = bluetoothManager.adapter
     private val scanner = adapter?.bluetoothLeScanner
+    private val notificationBuffer = StringBuilder()
 
     private var hasBeenReady = false
     private var bluetoothGatt: BluetoothGatt? = null
@@ -305,12 +306,8 @@ class PlantBluetoothManager(
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-
             if (characteristic.uuid == TX_UUID) {
-                val message = value.toString(Charsets.UTF_8)
-
-                Log.d(TAG, "Received from plant: $message")
-                onMessageReceived(message)
+                handleIncomingNotification(value)
             }
         }
 
@@ -320,17 +317,14 @@ class PlantBluetoothManager(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic
         ) {
-
             if (
                 Build.VERSION.SDK_INT < 33 &&
                 characteristic.uuid == TX_UUID
             ) {
                 @Suppress("DEPRECATION")
-                val message =
-                    characteristic.value?.toString(Charsets.UTF_8) ?: ""
-
-                Log.d(TAG, "Received from plant: $message")
-                onMessageReceived(message)
+                characteristic.value?.let { value ->
+                    handleIncomingNotification(value)
+                }
             }
         }
     }
@@ -402,5 +396,33 @@ class PlantBluetoothManager(
 
         onStatusChanged("Disconnecting...")
         gatt.disconnect()
+    }
+
+    private fun handleIncomingNotification(value: ByteArray) {
+        val receivedText = value.toString(Charsets.UTF_8)
+
+        synchronized(notificationBuffer) {
+            notificationBuffer.append(receivedText)
+
+            while (true) {
+                val newlineIndex = notificationBuffer.indexOf("\n")
+
+                if (newlineIndex == -1) {
+                    break
+                }
+
+                val message = notificationBuffer
+                    .substring(0, newlineIndex)
+                    .trim()
+                    .trim('\r')
+
+                notificationBuffer.delete(0, newlineIndex + 1)
+
+                if (message.isNotBlank()) {
+                    Log.d(TAG, "Received from plant: $message")
+                    onMessageReceived(message)
+                }
+            }
+        }
     }
 }
