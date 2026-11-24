@@ -79,11 +79,6 @@ import com.google.firebase.initialize
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import androidx.compose.material3.Button
-import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -151,9 +146,10 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraPlantRootScreen() {
 
+
     val context = LocalContext.current
 
-    // Notification setting
+// Notification setting
     var notificationsEnabled by remember {
         mutableStateOf(true)
     }
@@ -162,11 +158,10 @@ fun AuraPlantRootScreen() {
         notificationsEnabled
     )
 
-
+// Plant state
     var currentMood by remember {
         mutableStateOf(PlantMood.SAD)
     }
-
 
     var waterLevel by remember {
         mutableIntStateOf(2)
@@ -190,10 +185,7 @@ fun AuraPlantRootScreen() {
         mutableIntStateOf(0)
     }
 
-
-
-
-    // [ADDED] Drop & Pat interaction state
+// Drop and Pat interaction state
     var activeInteraction by remember {
         mutableStateOf(PlantInteractionEvent.NONE)
     }
@@ -202,16 +194,17 @@ fun AuraPlantRootScreen() {
         mutableStateOf<String?>(null)
     }
 
-    // Clear the drop/pat alert when the user dismisses the banner.
+    // Clear interaction alert
     fun clearInteractionAlert() {
         activeInteraction = PlantInteractionEvent.NONE
         interactionAlertMessage = null
     }
 
-    // [ADDED] Auto-clear "pat pat" animation after 2.4 seconds
+// Automatically clear the pat animation after 2.4 seconds
     LaunchedEffect(activeInteraction) {
         if (activeInteraction == PlantInteractionEvent.PATTED) {
             delay(2400)
+
             if (activeInteraction == PlantInteractionEvent.PATTED) {
                 activeInteraction = PlantInteractionEvent.NONE
                 interactionAlertMessage = null
@@ -219,7 +212,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-    // [ADDED] Handle drop and pat events from BLE or test triggers
+    // Handle drop and pat events from BLE
     fun handleHardwareInteraction(event: String) {
         when (event.trim().uppercase()) {
 
@@ -232,7 +225,7 @@ fun AuraPlantRootScreen() {
                 interactionAlertMessage =
                     "Ouch! I'm hurt! Please help me!"
 
-                if (notificationsEnabled) {
+                if (currentNotificationsEnabled) {
                     AuraNotificationHelper.sendAlert(
                         context = context,
                         title = "AuraPlant Alert!",
@@ -257,102 +250,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-
-    var currentMood by remember {
-        mutableStateOf(PlantMood.SAD)
-    }
-
-
-    var waterLevel by remember {
-        mutableIntStateOf(2)
-    }
-
-    var wateringCount by remember {
-        mutableIntStateOf(0)
-    }
-
-    var dropCount by rememberSaveable {
-        mutableIntStateOf(0)
-    }
-
-    val lightLevel = 4
-
-    var patCount by rememberSaveable {
-        mutableIntStateOf(0)
-    }
-
-    var affirmationCount by rememberSaveable {
-        mutableIntStateOf(0)
-    }
-
-
-
-
-    // [ADDED] Drop & Pat interaction state
-    var activeInteraction by remember {
-        mutableStateOf(PlantInteractionEvent.NONE)
-    }
-
-    var interactionAlertMessage by remember {
-        mutableStateOf<String?>(null)
-    }
-
-    // Clear the drop/pat alert when the user dismisses the banner.
-    fun clearInteractionAlert() {
-        activeInteraction = PlantInteractionEvent.NONE
-        interactionAlertMessage = null
-    }
-
-    // [ADDED] Auto-clear "pat pat" animation after 2.4 seconds
-    LaunchedEffect(activeInteraction) {
-        if (activeInteraction == PlantInteractionEvent.PATTED) {
-            delay(2400)
-            if (activeInteraction == PlantInteractionEvent.PATTED) {
-                activeInteraction = PlantInteractionEvent.NONE
-                interactionAlertMessage = null
-            }
-        }
-    }
-
-    // [ADDED] Handle drop and pat events from BLE or test triggers
-    fun handleHardwareInteraction(event: String) {
-        when (event.trim().uppercase()) {
-
-            "DROP", "DROPPED" -> {
-                dropCount++
-
-                activeInteraction = PlantInteractionEvent.DROPPED
-                currentMood = PlantMood.SAD
-
-                interactionAlertMessage =
-                    "Ouch! I'm hurt! Please help me!"
-
-                if (notificationsEnabled) {
-                    AuraNotificationHelper.sendAlert(
-                        context = context,
-                        title = "AuraPlant Alert!",
-                        message = "Ouch! I'm hurt! Please help me!"
-                    )
-                }
-            }
-
-            "UPRIGHT", "NORMAL" -> {
-                activeInteraction = PlantInteractionEvent.NONE
-                interactionAlertMessage = null
-                currentMood = PlantMood.HAPPY
-            }
-
-            "PAT", "PATTED" -> {
-                patCount++
-
-                activeInteraction = PlantInteractionEvent.PATTED
-                currentMood = PlantMood.HAPPY
-                interactionAlertMessage = "pat pat"
-            }
-        }
-    }
-
-    // Bluetooth connection states
+// Bluetooth connection states
     var bluetoothStatus by remember {
         mutableStateOf("Not connected")
     }
@@ -365,24 +263,27 @@ fun AuraPlantRootScreen() {
         mutableStateOf("")
     }
 
-    // Main thread handler
+// Main thread handler
     val mainHandler = remember {
         Handler(Looper.getMainLooper())
     }
 
-    // Bluetooth manager
-    val bluetoothManager = remember(context) {
+// Keep the latest interaction handler available to BLE callbacks
+    val currentHardwareInteraction by rememberUpdatedState(
+        ::handleHardwareInteraction
+    )
 
+// Bluetooth manager
+    val bluetoothManager = remember(context) {
         PlantBluetoothManager(
             context = context,
 
             onMessageReceived = { message ->
                 mainHandler.post {
                     lastDeviceMessage = message.trim()
-                    // Process hardware interaction messages from the TinyCircuits device.
-                    // handleHardwareInteraction() ignores messages other than DROP/DROPPED
-                    // and PAT/PATTED.
-                    handleHardwareInteraction(message)
+
+                    // Process DROP, PAT, UPRIGHT and NORMAL messages
+                    currentHardwareInteraction(message)
 
                     Log.d("AuraPlant BLE", "Device says: $message")
                 }
@@ -400,9 +301,7 @@ fun AuraPlantRootScreen() {
             },
 
             onConnectionEvent = { connected ->
-
                 mainHandler.post {
-
                     if (currentNotificationsEnabled) {
                         PlantNotificationHelper.show(
                             context = context,
@@ -949,7 +848,6 @@ fun AuraPlantRootScreen() {
                     bluetoothStatus = bluetoothStatus,
                     lastDeviceMessage = lastDeviceMessage,
                     isBluetoothReady = isBluetoothReady,
-
                     activeInteraction = activeInteraction,
                     interactionAlertMessage = interactionAlertMessage,
                     onSimulateDrop = { handleHardwareInteraction("DROP") },
@@ -961,12 +859,13 @@ fun AuraPlantRootScreen() {
                     },
 
                     onWaterPlant = {
-                        bluetoothManager.sendToPlant("R:WATER")
+                        bluetoothManager.sendToPlant("W:1")
 
                         wateringCount++
 
                         val nextWater = (waterLevel + 1).coerceAtMost(5)
                         waterLevel = nextWater
+
                         if (nextWater >= 4) {
                             currentMood = PlantMood.HAPPY
                         }
@@ -1036,7 +935,7 @@ fun AuraPlantRootScreen() {
                             currentMood = PlantMood.SAD
                             waterLevel = 2
                         }
-                    },
+                    }
 
                     )
 
@@ -1088,6 +987,7 @@ fun DashboardTabContent(
     bluetoothStatus: String,
     lastDeviceMessage: String,
     isBluetoothReady: Boolean,
+    onConnectToPlant: () -> Unit,
     onWaterPlant: () -> Unit,
     dailyMotivationalQuote: String,
     onRefreshQuote: () -> Unit,
