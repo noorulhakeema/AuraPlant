@@ -436,8 +436,10 @@ void setup() {
   Wireling.selectPort(MIC_PORT);
   light_sensor.init(GAIN_16X);
   display.begin();
-  display.setFlip(true);        // remove if the face is upside down
-  display.setBrightness(10);
+  display.setBitDepth(TSBitDepth8);
+  display.setColorMode(TSColorModeBGR);
+  display.setFlip(true);
+  display.setBrightness(7);
   accel.begin(BMA250_range_2g, BMA250_update_time_16ms);
   scanI2C("before servo");
 
@@ -504,9 +506,23 @@ void loop() {
   // Manual test keys from the Serial Monitor
   while (SerialMonitorInterface.available()) {
     char c = SerialMonitorInterface.read();
-    if (c == 'p') { SerialMonitorInterface.println("CMD p"); reactPerk(); }
-    if (c == 'h') { SerialMonitorInterface.println("CMD h"); reactHappy(); }
-    if (c == 'w') { SerialMonitorInterface.println("CMD w"); reactWater(); }
+
+    if (c == 'p') {
+        SerialMonitorInterface.println("CMD p");
+        reactPerk();
+    }
+
+    if (c == 'h') {
+        SerialMonitorInterface.println("CMD h");
+        reactHappy();
+    }
+
+    if (c == 'w') {
+        SerialMonitorInterface.println("CMD w");
+        lastWatered = millis();
+        addMood(20);
+        reactWater();
+    }
   }
 
   float loud = readLoudness();
