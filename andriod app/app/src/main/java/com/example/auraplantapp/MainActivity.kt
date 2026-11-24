@@ -44,6 +44,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Button
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -102,6 +103,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
+import java.util.Calendar
 
 
 enum class PlantInteractionEvent {
@@ -185,7 +187,7 @@ fun AuraPlantRootScreen() {
         mutableIntStateOf(0)
     }
 
-// Drop and Pat interaction state
+    // [ADDED] Drop & Pat interaction state
     var activeInteraction by remember {
         mutableStateOf(PlantInteractionEvent.NONE)
     }
@@ -200,7 +202,7 @@ fun AuraPlantRootScreen() {
         interactionAlertMessage = null
     }
 
-// Automatically clear the pat animation after 2.4 seconds
+    // [ADDED] Auto-clear "pat pat" animation after 2.4 seconds
     LaunchedEffect(activeInteraction) {
         if (activeInteraction == PlantInteractionEvent.PATTED) {
             delay(2400)
@@ -212,7 +214,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-    // Handle drop and pat events from BLE
+    // [ADDED] Handle drop and pat events from BLE or test triggers
     fun handleHardwareInteraction(event: String) {
         when (event.trim().uppercase()) {
 
@@ -250,7 +252,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-// Bluetooth connection states
+    // Bluetooth connection states
     var bluetoothStatus by remember {
         mutableStateOf("Not connected")
     }
@@ -263,12 +265,12 @@ fun AuraPlantRootScreen() {
         mutableStateOf("")
     }
 
-// Main thread handler
+    // Ensure Bluetooth callbacks update Compose state on the main thread
     val mainHandler = remember {
         Handler(Looper.getMainLooper())
     }
 
-// Keep the latest interaction handler available to BLE callbacks
+    // Keep the latest interaction handler available to BLE callbacks
     val currentHardwareInteraction by rememberUpdatedState(
         ::handleHardwareInteraction
     )
@@ -282,7 +284,9 @@ fun AuraPlantRootScreen() {
                 mainHandler.post {
                     lastDeviceMessage = message.trim()
 
-                    // Process DROP, PAT, UPRIGHT and NORMAL messages
+
+                    // Process hardware interaction messages from the TinyCircuits device.
+                    // handleHardwareInteraction() ignores messages other than DROP/DROPPED and PAT/PATTED.
                     currentHardwareInteraction(message)
 
                     Log.d("AuraPlant BLE", "Device says: $message")
@@ -422,10 +426,12 @@ fun AuraPlantRootScreen() {
         mutableStateOf(false)
     }
 
+    // True from the moment the user presses Stop until the AI has responded
     var isPlantThinking by remember {
         mutableStateOf(false)
     }
 
+    // Animated "." / "." / "..." shown while the AI has not responded yet
     var dotCount by remember {
         mutableIntStateOf(1)
     }
@@ -541,17 +547,18 @@ fun AuraPlantRootScreen() {
         coroutineScope.launch {
 
             try {
-
+                // Analyse the transcript using Gemini
                 val result = emotionAnalyzer.analyze(finalTranscript)
-
+                // Calculate the updated plant happiness and mood
                 val updatedState = PlantEmotionManager.applyAnalysis(
                     currentHappiness = plantHappiness,
                     analysis = result
                 )
 
+                // Update the plant's emotional state
                 plantHappiness = updatedState.happiness
                 plantMood = updatedState.mood
-
+                // Update the plant's actual facial expression
                 currentMood = when (updatedState.mood) {
                     "Sad" -> PlantMood.SAD
                     "Happy" -> PlantMood.HAPPY
@@ -560,6 +567,7 @@ fun AuraPlantRootScreen() {
 
                 plantResponseText = result.plantResponse
 
+                // Display Gemini's response
                 quoteStatusText =
                     "AI analysis complete: ${result.sentiment}"
 
@@ -638,7 +646,7 @@ fun AuraPlantRootScreen() {
             },
 
             onFinalResult = { finalText ->
-
+                // If the final result is empty, fall back to the last partial text
                 val combinedTranscript = listOf(
                     transcribedQuote,
                     finalText.ifBlank { partialQuote }
@@ -649,6 +657,7 @@ fun AuraPlantRootScreen() {
                 transcribedQuote = combinedTranscript
                 partialQuote = ""
 
+                // Only analyse after the user presses Stop
                 if (shouldAnalyzeAfterStop) {
                     shouldAnalyzeAfterStop = false
                     analyzeCompletedQuote(combinedTranscript)
@@ -698,7 +707,7 @@ fun AuraPlantRootScreen() {
     fun toggleRecordingNow() {
 
         if (!isRecordingQuote) {
-
+            // Start a new speech session
             transcribedQuote = ""
             partialQuote = ""
             plantResponseText = ""
@@ -715,6 +724,7 @@ fun AuraPlantRootScreen() {
 
         } else {
 
+            // Stop speech recognition
             shouldAnalyzeAfterStop = true
 
             isRecordingQuote = false
@@ -723,7 +733,7 @@ fun AuraPlantRootScreen() {
             quoteStatusText = "Finishing transcription..."
 
             speechTranscriber.stopListening()
-
+            // Safety net: if Android never calls back, use what we have after 4s
             coroutineScope.launch {
                 delay(4000)
 
@@ -1086,6 +1096,60 @@ fun DashboardTabContent(
                 ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // [AMENDED START] Dismissible notification banner for drop alert or pat message
+            if (interactionAlertMessage != null) {
+                val isDrop = activeInteraction == PlantInteractionEvent.DROPPED
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isDrop) BarRed.copy(alpha = 0.14f) else SageHeader.copy(alpha = 0.18f),
+                    border = BorderStroke(
+                        width = 1.5.dp,
+                        color = if (isDrop) BarRed else SageHeader
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (!isDrop) {
+                                Icon(
+                                    imageVector = Icons.Default.Favorite,
+                                    contentDescription = "Pat Pat",
+                                    tint = BarRed,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Text(
+                                text = interactionAlertMessage,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDrop) BarRed else TextDark
+                            )
+                        }
+                        TextButton(
+                            onClick = onDismissAlert,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                        ) {
+                            Text(
+                                text = "✕",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDrop) BarRed else TextDark
+                            )
+                        }
+                    }
+                }
+            }
+            // [AMENDED END]
 
             // Weekly Mood Tracking
             DailyMoodCalendarCard(
@@ -1093,7 +1157,7 @@ fun DashboardTabContent(
                 entries = weeklyMoods
             )
 
-            // Daily motivation
+            // Card 1 - Randomised Motivational Quote
             Column(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1132,7 +1196,7 @@ fun DashboardTabContent(
                 )
             }
 
-            // Audio transcript and playback
+            // Card 2 - Audio Transcript and Playback
             Column(
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1245,13 +1309,15 @@ fun MoodCalendarJournalScreen(
             "Tap any day on the calendar to inspect your plant's mood."
         )
     }
-
+    // Sample monthly mood log
     val monthlyEntries = remember(todayMood) {
+        val calendar = Calendar.getInstance()
 
-        (1..28).map { day ->
+        val daysInMonth = calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
 
+        (1..daysInMonth).map { day ->
             val mood = when {
-                day == 28 -> todayMood
+                day == calendar.get(Calendar.DAY_OF_MONTH) -> todayMood
                 day % 6 == 0 -> PlantMood.SAD
                 day % 4 == 0 -> PlantMood.THIRSTY
                 else -> PlantMood.HAPPY
