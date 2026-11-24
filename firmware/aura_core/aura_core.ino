@@ -1,4 +1,5 @@
-// AuraPlant Core v4: Vitality system + LIVE TUNING + ACCELEROMETER WATCH
+// AuraPlant Core v5: Vitality system + LIVE TUNING + ACCELEROMETER WATCH + approved SmoothOrange display
+// Keep AuraApprovedDisplay.h and AuraFrames.h (teammate's files, unchanged) in the same sketch folder.
 // Serial Monitor must be set to "Newline". Type "help" for the command list.
 #include <SPI.h>
 #include <STBLE.h>
@@ -23,12 +24,12 @@ int happyUs     = 2100;   // highest (fully up)
 int compStep    = 20;     // each compliment adds this much vitality (out of 100)
 
 int waterUs     = 2100;   // how high water lifts the plant (max is 2100)
-int waterRise   = 800;    // time to rise (ms), bigger = slower/smoother
-int waterHold   = 5000;   // how long it stays up (ms)
+int waterRise   = 1800;   // time to rise (ms). Matches the display's 1800 ms "fill"
+int waterHold   = 10000;  // how long it stays up (ms). Matches the display's 10 s "hold"
 
 int patLift     = 300;    // pat lifts the plant this much (us) above its normal height
 int patRise     = 600;    // time to rise on a pat (ms)
-int patHold     = 3000;   // how long it stays lifted (ms), heart shows meanwhile
+int patHold     = 3000;   // how long it stays lifted (ms), happy face meanwhile
 
 int lightPct    = 50;     // in bright light the plant rises to this % of its range (50 = half)
 int dizLow      = 900;
@@ -47,6 +48,7 @@ int shakeN      = 4;      // this many bumps close together = shake (dizzy)
 // Behaviour
 unsigned long DECAY_INTERVAL = 5000;
 unsigned long CARE_GRACE     = 10000;
+unsigned long thirstyMs      = 120000;   // no water for this long -> thirsty face (0 = never thirsty)
 float DECAY_NORMAL = 3.0f;
 float DECAY_BRIGHT = 1.0f;
 float DECAY_DARK   = 5.0f;
@@ -61,6 +63,15 @@ const int SERVO_MIN_LIMIT = 900;
 const int SERVO_MAX_LIMIT = 2100;
 const unsigned long SERVO_STEP_MS = 20;
 const int SERVO_DEADBAND_US = 15;
+
+// Face IDs used by the approved display (these index the display's own face table)
+const int FACE_HAPPY      = 0;
+const int FACE_CONTENT    = 1;
+const int FACE_SAD        = 2;
+const int FACE_THIRSTY    = 3;
+const int FACE_DIZZY      = 4;
+const int FACE_NEED_LIGHT = 5;
+const int FACE_NEUTRAL    = 6;
 
 // ================= STATE =================
 bool tuneMode = false;
@@ -97,13 +108,14 @@ unsigned long lastBleSend = 2500;
 float vitality = 60.0f;
 unsigned long lastDecay = 0;
 unsigned long lastCare = 0;
+unsigned long lastWatered = 0;
+unsigned long lastInteraction = 0;   // for the 10 minute sleep
+unsigned long nextIdleAnim = 20000;  // next little idle animation (wink / look / wiggle)
 
-int lastFace = -1;
-unsigned long dizzyUntil = 0;
-unsigned long heartUntil = 0;
+int lastFace = -1;                // the display helper also reads/writes this
+unsigned long dizzyUntil = 0;     // the display helper also reads this
+unsigned long heartUntil = 0;     // pat: happy face while lifted
 unsigned long happyUntil = 0;
-unsigned long lastBeat = 0;
-bool beatBig = true;
 unsigned long nextBlink = 4000;
 unsigned long blinkEnd = 0;
 bool blinking = false;
@@ -123,6 +135,18 @@ int wiggleHigh = 2100;
 bool wiggleDir = true;
 unsigned long wiggleStepMs = 900;
 bool servoOk = false;
+
+// Teammate's display helper. Must come AFTER display, lastFace and dizzyUntil are declared.
+#include "AuraApprovedDisplay.h"
+
+// Call whenever the plant is "touched" (care, pat, shake...). Resets the sleep timer and wakes it up.
+void markInteraction() {
+  lastInteraction = millis();
+  if (auraScene == AURA_SLEEP) {
+    auraWakeDisplay();
+    auraStartThink();                 // "just woke" animation
+  }
+}
 
 // ================= SERVO =================
 void servoWrite(int us) {
@@ -199,11 +223,13 @@ void updateVitality() {
 // ================= REACTIONS =================
 void reactCompliment() {
   bool alreadyMax = (vitality >= 99.5f);
+  markInteraction();
   addVitality(compStep);                    // every compliment raises it a bit more
   lastCare = millis();
   happyUntil = millis() + 3000;
   dizzyUntil = 0;                           // a kind word cheers it up
   wiggleUntil = 0;
+  auraStartExcited();                       // display: excited burst
 
   if (millis() < holdUntil) return;         // water hold in progress: it will glide to the new height after
 
@@ -220,18 +246,23 @@ void reactCompliment() {
 }
 
 void reactWater() {
+  markInteraction();
   addVitality(30);
   lastCare = millis();
-  happyUntil = millis() + waterRise + waterHold;   // happy face while it is up
+  lastWatered = millis();
+  happyUntil = millis() + waterRise + waterHold;   // happy face after the animation if still within this time
   wiggleUntil = 0;                                  // no sway
   holdUntil = millis() + waterRise + waterHold;     // stay up, then glide back to normal
   servoGoTo(waterUs, waterRise);
+  auraStartWater();                                 // display: fill -> hold 10 s -> drain
 }
 
 void reactPat() {
-  heartUntil = millis() + patRise + patHold;       // heart shows while lifted
+  markInteraction();
+  heartUntil = millis() + patRise + patHold;       // happy face while lifted
   addVitality(5);
   lastCare = millis();
+  auraStartExcited();                              // display: excited burst, then happy face
   if (millis() >= holdUntil) {                     // don't override a water hold
     wiggleUntil = 0;
     holdUntil = millis() + patRise + patHold;
@@ -240,6 +271,7 @@ void reactPat() {
 }
 
 void reactDizzy() {
+  markInteraction();
   dizzyUntil = millis() + dizDur;
   holdUntil = 0;
   addVitality(-5);
@@ -252,103 +284,26 @@ void reactDizzy() {
 }
 
 // ================= FACE =================
+// Returns one of the FACE_* IDs. Priority matches the approved display logic.
 int chooseFace() {
   unsigned long now = millis();
-  if (isTipped()) return 6;
-  if (now < dizzyUntil) return 4;
-  if (now < heartUntil) return 5;
-  if (now < happyUntil) return 0;
-  if (lastLux < LIGHT_DARK) return 3;
-  if (vitality >= 70) return 0;
-  if (vitality >= 40) return 1;
-  return 2;
-}
-
-const uint8_t HEART[6] = {0b0110110, 0b1111111, 0b1111111, 0b0111110, 0b0011100, 0b0001000};
-
-void drawHeart(bool big) {
-  display.drawRect(26, 12, 44, 40, true, 0, 0, 0);
-  int s = big ? 5 : 4;
-  int x0 = 48 - (7 * s) / 2;
-  int y0 = 32 - (6 * s) / 2;
-  for (int r = 0; r < 6; r++) {
-    for (int c = 0; c < 7; c++) {
-      if (HEART[r] & (1 << (6 - c))) {
-        display.drawRect(x0 + c * s, y0 + r * s, s, s, true, 255, 0, 60);
-      }
-    }
-  }
-}
-
-void drawFace(int face) {
-  display.clearScreen();
-
-  if (face == 5) { drawHeart(true); beatBig = true; lastBeat = millis(); return; }
-
-  if (face == 4) {
-    display.drawLine(22, 12, 36, 28, 255, 255, 255);
-    display.drawLine(36, 12, 22, 28, 255, 255, 255);
-    display.drawLine(60, 12, 74, 28, 255, 255, 255);
-    display.drawLine(74, 12, 60, 28, 255, 255, 255);
-    display.drawLine(30, 46, 40, 40, 255, 128, 0);
-    display.drawLine(40, 40, 50, 46, 255, 128, 0);
-    display.drawLine(50, 46, 60, 40, 255, 128, 0);
-    display.drawLine(60, 40, 66, 46, 255, 128, 0);
-    return;
-  }
-
-  if (face == 3) {
-    display.drawLine(22, 24, 36, 24, 255, 255, 255);
-    display.drawLine(60, 24, 74, 24, 255, 255, 255);
-    display.drawRect(44, 40, 8, 6, true, 0, 150, 255);
-    display.setFont(thinPixel7_10ptFontInfo);
-    display.fontColor(TS_8b_Yellow, TS_8b_Black);
-    display.setCursor(70, 4);
-    display.print("zzz");
-    return;
-  }
-
-  if (face == 6) {
-    display.drawRect(24, 16, 10, 12, true, 255, 255, 255);
-    display.drawRect(62, 16, 10, 12, true, 255, 255, 255);
-    display.drawLine(20, 6, 36, 13, 255, 0, 0);
-    display.drawLine(76, 6, 60, 13, 255, 0, 0);
-    display.drawLine(28, 50, 36, 42, 255, 0, 0);
-    display.drawLine(36, 42, 60, 42, 255, 0, 0);
-    display.drawLine(60, 42, 68, 50, 255, 0, 0);
-    return;
-  }
-
-  display.drawRect(24, 14, 10, 14, true, 255, 255, 255);
-  display.drawRect(62, 14, 10, 14, true, 255, 255, 255);
-
-  if (face == 0) {
-    display.drawLine(28, 40, 36, 50, 0, 255, 0);
-    display.drawLine(36, 50, 60, 50, 0, 255, 0);
-    display.drawLine(60, 50, 68, 40, 0, 255, 0);
-  } else if (face == 1) {
-    display.drawLine(30, 46, 66, 46, 255, 255, 0);
-  } else {
-    display.drawLine(28, 50, 36, 42, 255, 0, 0);
-    display.drawLine(36, 42, 60, 42, 255, 0, 0);
-    display.drawLine(60, 42, 68, 50, 255, 0, 0);
-  }
+  if (isTipped() || now < dizzyUntil) return FACE_DIZZY;
+  if (now < heartUntil || now < happyUntil) return FACE_HAPPY;
+  if (thirstyMs > 0 && now - lastWatered > thirstyMs) return FACE_THIRSTY;
+  if (lastLux < LIGHT_DARK) return FACE_NEED_LIGHT;
+  if (vitality >= 70) return FACE_CONTENT;
+  if (vitality >= 40) return FACE_NEUTRAL;
+  return FACE_SAD;
 }
 
 void drawEyes(bool open) {
-  display.drawRect(22, 12, 14, 18, true, 0, 0, 0);
-  display.drawRect(60, 12, 14, 18, true, 0, 0, 0);
-  if (open) {
-    display.drawRect(24, 14, 10, 14, true, 255, 255, 255);
-    display.drawRect(62, 14, 10, 14, true, 255, 255, 255);
-  } else {
-    display.drawLine(24, 21, 34, 21, 255, 255, 255);
-    display.drawLine(62, 21, 72, 21, 255, 255, 255);
-  }
+  if (lastFace == FACE_DIZZY) return;      // dizzy keeps its spiral eyes
+  auraDrawLegacyFace(lastFace, !open);
 }
 
 void updateBlink() {
-  if (lastFace != 0 && lastFace != 1 && lastFace != 2) return;
+  if (auraAnimationActive()) return;
+  if (lastFace < 0 || lastFace == FACE_DIZZY) return;
   unsigned long now = millis();
   if (!blinking && now > nextBlink) {
     blinking = true;
@@ -361,17 +316,33 @@ void updateBlink() {
   }
 }
 
+// Only redraws when the face changes. Does nothing while an animation is playing.
 void updateFace() {
+  if (auraAnimationActive()) return;
   int f = chooseFace();
   if (f != lastFace) {
     lastFace = f;
     blinking = false;
-    drawFace(f);
+    auraDrawLegacyFace(f, false);
   }
-  if (lastFace == 5 && millis() - lastBeat > 300) {
-    lastBeat = millis();
-    beatBig = !beatBig;
-    drawHeart(beatBig);
+}
+
+// Little idle animations so the plant feels alive, and sleep after 10 minutes with no interaction
+void updateIdleAnims() {
+  unsigned long now = millis();
+  if (auraAnimationActive() || isTipped() || now < dizzyUntil) return;
+  if (tuneMode) { lastInteraction = now; return; }       // never sleep while tuning
+  if (now - lastInteraction >= AURA_IDLE_SLEEP_MS) { auraStartSleeping(); return; }
+  if (now < nextIdleAnim) return;
+  nextIdleAnim = now + 20000 + (now % 20000);            // every 20-40 s
+  if (lastFace == FACE_CONTENT) {
+    switch ((now / 100) % 3) {
+      case 0:  auraStartWink();   break;
+      case 1:  auraStartLook();   break;
+      default: auraStartWiggle(); break;
+    }
+  } else if (lastFace == FACE_NEUTRAL) {
+    auraStartLook();
   }
 }
 
@@ -396,7 +367,12 @@ void handleIncoming() {
 
   if (cmd == "A:1" || cmd == "R:HAPPY") reactCompliment();
   else if (cmd == "W:1") reactWater();
-  else if (cmd == "R:PERK") { addVitality(10); lastCare = millis(); }
+  else if (cmd == "R:PERK") {                 // phone heard speech: "I heard you"
+    markInteraction();
+    addVitality(10);
+    lastCare = millis();
+    auraStartTalking();
+  }
 }
 
 // ================= ACCELEROMETER =================
@@ -440,6 +416,7 @@ void updateAccel() {
     if (tippedSince == 0) tippedSince = now;
     if (!fellOver && now - tippedSince > 1500) {
       fellOver = true;
+      markInteraction();
       if (!tuneMode) addVitality(-10);
       SerialMonitorInterface.println("E:TIPPED");
       if (!tuneMode) bleSend("E:TIPPED\n");
@@ -448,10 +425,14 @@ void updateAccel() {
     tippedSince = 0;
     if (fellOver) {
       fellOver = false;
+      markInteraction();
       SerialMonitorInterface.println("E:UPRIGHT");
       if (!tuneMode) bleSend("E:UPRIGHT\n");
     }
   }
+
+  // While tipped (or fake-tipped) keep the dizzy face and stop animations from covering it
+  if (isTipped()) dizzyUntil = now + 500;
 
   if (now < accelLockUntil) { spikeCount = 0; burstPeak = 0; return; }
   if (isTipped()) { spikeCount = 0; burstPeak = 0; return; }
@@ -522,10 +503,12 @@ void printHelp() {
   SerialMonitorInterface.println(F("f            glide back to the height matching vitality"));
   SerialMonitorInterface.println(F("v 50         set vitality to 50"));
   SerialMonitorInterface.println(F("w h p d u    water, compliment, pat, dizzy, toggle tipped"));
+  SerialMonitorInterface.println(F("x NAME       preview a display animation:"));
+  SerialMonitorInterface.println(F("             wink look think wiggle excited talk sleep sun water"));
   SerialMonitorInterface.println(F("set NAME N   e.g. set spike 80"));
   SerialMonitorInterface.println(F("   names: rest happy waterUs waterRise waterHold dizLow dizHigh"));
   SerialMonitorInterface.println(F("          dizMs dizDur compMs returnMs tipped spike shakeN"));
-  SerialMonitorInterface.println(F("          patLift patRise patHold lightPct lightGood lightDark compStep"));
+  SerialMonitorInterface.println(F("          patLift patRise patHold lightPct lightGood lightDark compStep thirstyMs"));
   SerialMonitorInterface.println(F("l            print the current light reading (lux)"));
   SerialMonitorInterface.println(F("show         print all values as code to paste into the sketch"));
 }
@@ -551,6 +534,7 @@ void printValues() {
   SerialMonitorInterface.print("int patHold   = "); SerialMonitorInterface.print(patHold);  SerialMonitorInterface.println(";");
   SerialMonitorInterface.print("int lightPct  = "); SerialMonitorInterface.print(lightPct); SerialMonitorInterface.println(";");
   SerialMonitorInterface.print("int compStep  = "); SerialMonitorInterface.print(compStep); SerialMonitorInterface.println(";");
+  SerialMonitorInterface.print("unsigned long thirstyMs = "); SerialMonitorInterface.print(thirstyMs); SerialMonitorInterface.println(";");
   SerialMonitorInterface.print("float LIGHT_GOOD = "); SerialMonitorInterface.print(LIGHT_GOOD); SerialMonitorInterface.println("f;");
   SerialMonitorInterface.print("float LIGHT_DARK = "); SerialMonitorInterface.print(LIGHT_DARK); SerialMonitorInterface.println("f;");
 }
@@ -589,6 +573,23 @@ void handleCommand(String line) {
     holdUntil = 0;
     servoGoTo(restingHeight(), returnMs);
     SerialMonitorInterface.print("returning to "); SerialMonitorInterface.println(restingHeight());
+    return;
+  }
+  if (line.startsWith("x ")) {
+    String n = line.substring(2);
+    n.trim();
+    markInteraction();
+    if (n == "wink") auraStartWink();            // only plays while the content face is showing
+    else if (n == "look") auraStartLook();
+    else if (n == "think") auraStartThink();
+    else if (n == "wiggle") auraStartWiggle();
+    else if (n == "excited") auraStartExcited();
+    else if (n == "talk") auraStartTalking();
+    else if (n == "sleep") auraStartSleeping();
+    else if (n == "sun") auraStartSunlight();
+    else if (n == "water") auraStartWater();
+    else { SerialMonitorInterface.println("unknown animation, type help"); return; }
+    SerialMonitorInterface.print("animation: "); SerialMonitorInterface.println(n);
     return;
   }
   if (line.startsWith("g ")) {
@@ -632,6 +633,7 @@ void handleCommand(String line) {
     else if (name == "lightGood") LIGHT_GOOD = val;
     else if (name == "lightDark") LIGHT_DARK = val;
     else if (name == "compStep") compStep = val;
+    else if (name == "thirstyMs") thirstyMs = (unsigned long)val;
     else ok = false;
     if (ok) { SerialMonitorInterface.print(name); SerialMonitorInterface.print(" = "); SerialMonitorInterface.println(val); }
     else SerialMonitorInterface.println("unknown name, type help");
@@ -659,9 +661,14 @@ void setup() {
   Wire.begin();
   Wireling.begin();
   light_sensor.init(GAIN_16X);
+
+  // Display settings required by the approved BGR332 frames
   display.begin();
-  display.setFlip(false);
-  display.setBrightness(10);
+  display.setBitDepth(TSBitDepth8);
+  display.setColorMode(TSColorModeBGR);
+  display.setFlip(true);            // if the picture is upside down, change to false
+  display.setBrightness(7);
+
   accel.begin(BMA250_range_2g, BMA250_update_time_16ms);
   scanI2C("before servo");
 
@@ -689,6 +696,10 @@ void setup() {
   } else {
     SerialMonitorInterface.println("Servo controller NOT detected!");
   }
+
+  lastWatered = millis();           // don't start out thirsty
+  lastInteraction = millis();
+  auraStartThink();                 // little "just woke up" animation on power-on
   printHelp();
 }
 
@@ -698,9 +709,11 @@ void loop() {
 
   readSerialCommands();
   servoUpdate();
+  updateAccel();                    // always runs (prints only, in tune mode)
+  auraTick();                       // advances the current display animation
   updateFace();
   updateBlink();
-  updateAccel();                    // always runs (prints only, in tune mode)
+  updateIdleAnims();
 
   if (!tuneMode) updateVitality();
 
@@ -717,6 +730,7 @@ void loop() {
   aci_loop();
   handleIncoming();
 
+  static bool firstLuxRead = true;
   if (now - lastLightRead > 500) {
     lastLightRead = now;
     lastLux = light_sensor.readAmbientLight();
@@ -729,7 +743,13 @@ void loop() {
       SerialMonitorInterface.print(lightBright ? "LIGHT: sufficient (lux=" : "LIGHT: not enough (lux=");
       SerialMonitorInterface.print(lastLux);
       SerialMonitorInterface.println(")");
+      // light just became sufficient: sun rays sweep in
+      if (lightBright && !firstLuxRead && !tuneMode) {
+        markInteraction();
+        auraStartSunlight();
+      }
     }
+    firstLuxRead = false;
   }
   if (now - lastBleLight > 5000) {
     lastBleLight = now;
