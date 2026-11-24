@@ -2,15 +2,14 @@
 package com.example.auraplantapp
 
 import android.util.Log
-import com.google.firebase.Firebase
-import com.google.firebase.ai.ai
-import com.google.firebase.ai.type.GenerativeBackend
-import com.google.firebase.ai.type.Schema
-import com.google.firebase.ai.type.generationConfig
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 data class EmotionAnalysis(
     val sentiment: String,
@@ -23,39 +22,23 @@ class GeminiEmotionAnalyzer {
 
     private val maxAttempts = 3
 
-    private val responseSchema = Schema.obj(
-        mapOf(
-            "sentiment" to Schema.enumeration(
-                listOf("positive", "negative", "neutral"),
-                description = "Overall emotional tone of the transcript"
-            ),
-            "emotionChange" to Schema.integer(
-                description = "Positive: 1 to 15, Negative: -1 to -15, Neutral: 0"
-            ),
-            "reason" to Schema.string(
-                description = "Short reason for the classification"
-            ),
-            "plantResponse" to Schema.string(
-                description = "One short friendly sentence from the plant"
-            )
-        )
-    )
+    // Gemini API key from BuildConfig
+    private val apiKey = BuildConfig.GEMINI_API_KEY
 
-    private val model =
-        Firebase.ai(
-            backend = GenerativeBackend.googleAI()
-        ).generativeModel(
-            modelName = "gemini-3.5-flash-lite",
-            generationConfig = generationConfig {
-                responseMimeType = "application/json"
-                responseSchema = this@GeminiEmotionAnalyzer.responseSchema
-            }
-        )
+    private val modelName = "gemini-3.5-flash-lite"
+
+    // IMPORTANT: This must be a normal URL, not a Markdown hyperlink.
+    private val apiUrl =
+        "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent"
 
     suspend fun analyze(transcript: String): EmotionAnalysis {
 
         require(transcript.isNotBlank()) {
             "Transcript cannot be empty."
+        }
+
+        require(apiKey.isNotBlank()) {
+            "Gemini API key is missing. Check local.properties."
         }
 
         val prompt = """
@@ -78,7 +61,7 @@ class GeminiEmotionAnalyzer {
             - reason must briefly explain the classification.
             - plantResponse must be one short friendly sentence.
 
-            Respond with a single JSON object with exactly these keys:
+            Return a single JSON object with exactly these keys:
             "sentiment", "emotionChange", "reason", "plantResponse".
 
             Transcript:
@@ -96,12 +79,9 @@ class GeminiEmotionAnalyzer {
 
             try {
 
-                // Generate a new Gemini response.
-                // This is inside the try block so API errors can be retried.
-                val response = model.generateContent(prompt)
-
-                val responseText = response.text
-                    ?: throw Exception("Gemini returned an empty response.")
+                val responseText = withContext(Dispatchers.IO) {
+                    generateContent(prompt)
+                }
 
                 Log.d(
                     "GeminiEmotion",
@@ -110,22 +90,9 @@ class GeminiEmotionAnalyzer {
 
                 val json = parseToObject(responseText)
 
-                // Case-insensitive key lookup.
-                fun find(key: String): Any? {
-                    val actual = json.keys().asSequence()
-                        .firstOrNull {
-                            it.equals(key, ignoreCase = true)
-                        }
-
-                    return actual?.let { json.opt(it) }
-                }
-
-                // Validate sentiment.
-                val sentiment = find("sentiment")
-                    ?.toString()
-                    ?.trim()
-                    ?.lowercase()
-                    ?: throw Exception("Missing sentiment.")
+                val sentiment = json.optString("sentiment")
+                    .trim()
+                    .lowercase()
 
                 if (sentiment !in listOf(
                         "positive",
@@ -133,20 +100,17 @@ class GeminiEmotionAnalyzer {
                         "neutral"
                     )
                 ) {
-                    throw Exception(
-                        "Invalid sentiment: $sentiment"
-                    )
+                    throw Exception("Invalid sentiment: $sentiment")
                 }
 
-                // Validate emotion change.
-                val emotionChange = when (val v = find("emotionChange")) {
+                val emotionValue = json.opt("emotionChange")
+
+                val emotionChange = when (emotionValue) {
 
                     is Number -> {
-                        val number = v.toDouble()
+                        val number = emotionValue.toDouble()
 
-                        if (!number.isFinite() ||
-                            number % 1.0 != 0.0
-                        ) {
+                        if (!number.isFinite() || number % 1.0 != 0.0) {
                             throw Exception(
                                 "Emotion change must be an integer."
                             )
@@ -156,20 +120,17 @@ class GeminiEmotionAnalyzer {
                     }
 
                     is String -> {
-                        v.trim().toIntOrNull()
+                        emotionValue.trim().toIntOrNull()
                             ?: throw Exception(
                                 "Invalid emotion change."
                             )
                     }
 
                     else -> {
-                        throw Exception(
-                            "Missing emotion change."
-                        )
+                        throw Exception("Missing emotion change.")
                     }
                 }
 
-                // Ensure emotion change matches sentiment.
                 when (sentiment) {
 
                     "positive" -> {
@@ -197,25 +158,16 @@ class GeminiEmotionAnalyzer {
                     }
                 }
 
-                // Validate reason.
-                val reason = find("reason")
-                    ?.toString()
-                    ?.trim()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: throw Exception(
-                        "Missing or empty reason."
-                    )
+                val reason = json.optString("reason")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?: throw Exception("Missing or empty reason.")
 
-                // Validate plant response.
-                val plantResponse = find("plantResponse")
-                    ?.toString()
-                    ?.trim()
-                    ?.takeIf { it.isNotBlank() }
-                    ?: throw Exception(
-                        "Missing or empty plant response."
-                    )
+                val plantResponse = json.optString("plantResponse")
+                    .trim()
+                    .takeIf { it.isNotBlank() }
+                    ?: throw Exception("Missing or empty plant response.")
 
-                // All validations passed.
                 Log.d(
                     "GeminiEmotion",
                     "Valid response received on attempt $attempt."
@@ -229,7 +181,6 @@ class GeminiEmotionAnalyzer {
                 )
 
             } catch (e: CancellationException) {
-                // Do not swallow coroutine cancellation.
                 throw e
 
             } catch (e: Exception) {
@@ -242,21 +193,133 @@ class GeminiEmotionAnalyzer {
                     e
                 )
 
-                // Wait before trying again.
                 if (attempt < maxAttempts) {
                     delay(1000L * attempt)
                 }
             }
         }
 
-        // All attempts failed.
         throw Exception(
-            "Gemini failed to return a valid response after $maxAttempts attempts.",
+            "Gemini failed after $maxAttempts attempts.",
             lastError
         )
     }
 
-    // Handles code fences, arrays, and wrapped objects.
+    private fun generateContent(prompt: String): String {
+
+        val connection = URL(apiUrl)
+            .openConnection() as HttpURLConnection
+
+        try {
+
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 15000
+            connection.readTimeout = 30000
+            connection.doOutput = true
+
+            connection.setRequestProperty(
+                "Content-Type",
+                "application/json"
+            )
+
+            connection.setRequestProperty(
+                "x-goog-api-key",
+                apiKey
+            )
+
+            val requestBody = JSONObject().apply {
+
+                put(
+                    "contents",
+                    JSONArray().put(
+                        JSONObject().apply {
+                            put(
+                                "parts",
+                                JSONArray().put(
+                                    JSONObject().put("text", prompt)
+                                )
+                            )
+                        }
+                    )
+                )
+
+                put(
+                    "generationConfig",
+                    JSONObject().apply {
+                        put("responseMimeType", "application/json")
+                        put("temperature", 0.2)
+                    }
+                )
+            }
+
+            connection.outputStream.use { output ->
+                output.write(
+                    requestBody.toString()
+                        .toByteArray(Charsets.UTF_8)
+                )
+            }
+
+            val statusCode = connection.responseCode
+
+            val responseStream = if (statusCode in 200..299) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            }
+
+            val responseBody = responseStream
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                ?: ""
+
+            if (statusCode !in 200..299) {
+                throw Exception(
+                    "Gemini API HTTP $statusCode: $responseBody"
+                )
+            }
+
+            val responseJson = JSONObject(responseBody)
+
+            val candidates = responseJson.optJSONArray("candidates")
+                ?: throw Exception(
+                    "Gemini returned no candidates: $responseBody"
+                )
+
+            if (candidates.length() == 0) {
+                throw Exception(
+                    "Gemini returned an empty candidates list."
+                )
+            }
+
+            val content = candidates
+                .getJSONObject(0)
+                .optJSONObject("content")
+                ?: throw Exception("Gemini response has no content.")
+
+            val parts = content.optJSONArray("parts")
+                ?: throw Exception("Gemini response has no parts.")
+
+            val textBuilder = StringBuilder()
+
+            for (i in 0 until parts.length()) {
+
+                val part = parts.optJSONObject(i)
+                val text = part?.optString("text").orEmpty()
+
+                if (text.isNotBlank()) {
+                    textBuilder.append(text)
+                }
+            }
+
+            return textBuilder.toString()
+                .takeIf { it.isNotBlank() }
+                ?: throw Exception("Gemini returned empty text.")
+
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun parseToObject(raw: String): JSONObject {
 
         val cleaned = raw
@@ -265,10 +328,11 @@ class GeminiEmotionAnalyzer {
             .trim()
 
         if (cleaned.startsWith("[")) {
-            val arr = JSONArray(cleaned)
 
-            if (arr.length() > 0) {
-                return arr.getJSONObject(0)
+            val array = JSONArray(cleaned)
+
+            if (array.length() > 0) {
+                return array.getJSONObject(0)
             }
 
             throw Exception("Gemini returned an empty JSON array.")
@@ -276,23 +340,15 @@ class GeminiEmotionAnalyzer {
 
         val obj = JSONObject(cleaned)
 
-        // If fields are nested one level down, unwrap them.
-        val sentimentKey = obj.keys().asSequence()
-            .firstOrNull {
-                it.equals("sentiment", ignoreCase = true)
-            }
+        if (!obj.has("sentiment")) {
 
-        if (sentimentKey == null) {
+            val keys = obj.keys()
 
-            for (key in obj.keys()) {
+            while (keys.hasNext()) {
 
-                val inner = obj.optJSONObject(key)
+                val inner = obj.optJSONObject(keys.next())
 
-                if (inner != null &&
-                    inner.keys().asSequence().any {
-                        it.equals("sentiment", ignoreCase = true)
-                    }
-                ) {
+                if (inner?.has("sentiment") == true) {
                     return inner
                 }
             }

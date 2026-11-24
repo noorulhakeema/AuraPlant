@@ -22,7 +22,8 @@ import java.util.UUID
 class PlantBluetoothManager(
     private val context: Context,
     private val onMessageReceived: (String) -> Unit,
-    private val onStatusChanged: (String) -> Unit
+    private val onStatusChanged: (String) -> Unit,
+    private val onConnectionEvent: (Boolean) -> Unit = {}
 ) {
 
     private val bluetoothManager =
@@ -31,6 +32,7 @@ class PlantBluetoothManager(
     private val adapter = bluetoothManager.adapter
     private val scanner = adapter?.bluetoothLeScanner
 
+    private var hasBeenReady = false
     private var bluetoothGatt: BluetoothGatt? = null
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
     private var txCharacteristic: BluetoothGattCharacteristic? = null
@@ -53,7 +55,7 @@ class PlantBluetoothManager(
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 
-    // STEP 1: Scan specifically for the TinyCircuits board
+    // STEP 1: Scan for the TinyCircuits board
     @SuppressLint("MissingPermission")
     fun scanForPlant() {
 
@@ -107,13 +109,11 @@ class PlantBluetoothManager(
             result: ScanResult
         ) {
             val device = result.device
-
             val deviceName =
                 result.scanRecord?.deviceName ?: device.name
 
             Log.d(TAG, "Found BLE device: $deviceName")
 
-            // Ignore devices that are not our TinyCircuits board
             if (deviceName != "BlueNRG") {
                 return
             }
@@ -133,7 +133,7 @@ class PlantBluetoothManager(
         }
     }
 
-    // STEP 2: Connect to the TinyCircuits board
+    // STEP 2: Connect to TinyCircuits
     @SuppressLint("MissingPermission")
     private fun connectToPlant(device: BluetoothDevice) {
 
@@ -156,7 +156,8 @@ class PlantBluetoothManager(
             newState: Int
         ) {
 
-            if (status == BluetoothGatt.GATT_SUCCESS &&
+            if (
+                status == BluetoothGatt.GATT_SUCCESS &&
                 newState == BluetoothProfile.STATE_CONNECTED
             ) {
                 Log.d(TAG, "Connected. Discovering services...")
@@ -176,6 +177,13 @@ class PlantBluetoothManager(
                 }
 
                 gatt.close()
+
+                // Notify the phone if the board was previously ready
+                if (hasBeenReady) {
+                    hasBeenReady = false
+                    onConnectionEvent(false)
+                }
+
                 onStatusChanged("Disconnected")
             }
         }
@@ -219,7 +227,7 @@ class PlantBluetoothManager(
                 return
             }
 
-            // Enable notifications so the phone can receive board messages
+            // Enable notifications from the board
             val notificationEnabled = gatt.setCharacteristicNotification(
                 txCharacteristic,
                 true
@@ -230,8 +238,7 @@ class PlantBluetoothManager(
                 return
             }
 
-            val descriptor = txCharacteristic!!
-                .getDescriptor(CCCD_UUID)
+            val descriptor = txCharacteristic!!.getDescriptor(CCCD_UUID)
 
             if (descriptor == null) {
                 onStatusChanged("Notification descriptor not found")
@@ -264,6 +271,7 @@ class PlantBluetoothManager(
             }
         }
 
+        // STEP 3A: Notification setup completed
         override fun onDescriptorWrite(
             gatt: BluetoothGatt,
             descriptor: BluetoothGattDescriptor,
@@ -271,10 +279,21 @@ class PlantBluetoothManager(
         ) {
 
             if (descriptor.uuid == CCCD_UUID) {
+
                 if (status == BluetoothGatt.GATT_SUCCESS) {
+
                     Log.d(TAG, "Notifications enabled")
+
+                    // Notify only once when the board becomes ready
+                    if (!hasBeenReady) {
+                        hasBeenReady = true
+                        onConnectionEvent(true)
+                    }
+
                     onStatusChanged("Connected and ready!")
+
                 } else {
+                    Log.e(TAG, "Notification setup failed: $status")
                     onStatusChanged("Notification setup failed")
                 }
             }
@@ -302,12 +321,13 @@ class PlantBluetoothManager(
             characteristic: BluetoothGattCharacteristic
         ) {
 
-            if (Build.VERSION.SDK_INT < 33 &&
+            if (
+                Build.VERSION.SDK_INT < 33 &&
                 characteristic.uuid == TX_UUID
             ) {
                 @Suppress("DEPRECATION")
-                val message = characteristic.value
-                    ?.toString(Charsets.UTF_8) ?: ""
+                val message =
+                    characteristic.value?.toString(Charsets.UTF_8) ?: ""
 
                 Log.d(TAG, "Received from plant: $message")
                 onMessageReceived(message)
@@ -315,7 +335,7 @@ class PlantBluetoothManager(
         }
     }
 
-    // STEP 4: Send commands to the plant
+    // STEP 4: Send commands to TinyCircuits
     @SuppressLint("MissingPermission")
     fun sendToPlant(command: String) {
 
@@ -329,7 +349,7 @@ class PlantBluetoothManager(
 
         val data = command.toByteArray(Charsets.UTF_8)
 
-        // Your firmware uses CHAR_PROP_WRITE_WITHOUT_RESP
+        // Firmware uses CHAR_PROP_WRITE_WITHOUT_RESP
         if (Build.VERSION.SDK_INT >= 33) {
 
             val result = gatt.writeCharacteristic(

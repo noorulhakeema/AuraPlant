@@ -4,10 +4,16 @@ package com.example.auraplantapp
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,11 +30,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+
 import androidx.compose.material3.FabPosition
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -36,7 +44,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Button
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,29 +54,31 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+
 import androidx.core.content.ContextCompat
+
 import com.example.auraplantapp.ui.theme.BarRed
 import com.example.auraplantapp.ui.theme.CardSurface
 import com.example.auraplantapp.ui.theme.SageHeader
 import com.example.auraplantapp.ui.theme.TerracottaBox
 import com.example.auraplantapp.ui.theme.TextDark
 import com.example.auraplantapp.ui.theme.WarmCreamBg
+
 import com.google.firebase.Firebase
 import com.google.firebase.appcheck.appCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.initialize
+
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
 
 
 class MainActivity : ComponentActivity() {
@@ -82,6 +92,21 @@ class MainActivity : ComponentActivity() {
             DebugAppCheckProviderFactory.getInstance()
         )
 
+        // Create notification channel
+        PlantNotificationHelper.createChannel(this)
+
+        // Request notification permission on Android 13+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                1001
+            )
+        }
+
         setContent {
             AuraPlantRootScreen()
         }
@@ -92,11 +117,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AuraPlantRootScreen() {
 
+    val context = LocalContext.current
+
+    // Notification setting
     var notificationsEnabled by remember {
         mutableStateOf(true)
     }
 
-    val context = LocalContext.current
+    val currentNotificationsEnabled by rememberUpdatedState(
+        notificationsEnabled
+    )
 
     // Bluetooth connection states
     var bluetoothStatus by remember {
@@ -111,12 +141,12 @@ fun AuraPlantRootScreen() {
         mutableStateOf("")
     }
 
-    // Ensure Bluetooth callbacks update Compose state on the main thread
+    // Main thread handler
     val mainHandler = remember {
         Handler(Looper.getMainLooper())
     }
 
-    // Create Bluetooth manager
+    // Bluetooth manager
     val bluetoothManager = remember(context) {
 
         PlantBluetoothManager(
@@ -125,7 +155,6 @@ fun AuraPlantRootScreen() {
             onMessageReceived = { message ->
                 mainHandler.post {
                     lastDeviceMessage = message.trim()
-
                     Log.d("AuraPlant BLE", "Device says: $message")
                 }
             },
@@ -138,6 +167,28 @@ fun AuraPlantRootScreen() {
                         status == "Connected and ready!"
 
                     Log.d("AuraPlant BLE", status)
+                }
+            },
+
+            onConnectionEvent = { connected ->
+
+                mainHandler.post {
+
+                    if (currentNotificationsEnabled) {
+                        PlantNotificationHelper.show(
+                            context = context,
+                            connected = connected
+                        )
+                    }
+
+                    Log.d(
+                        "AuraPlant BLE",
+                        if (connected) {
+                            "TinyCircuits connected"
+                        } else {
+                            "TinyCircuits disconnected"
+                        }
+                    )
                 }
             }
         )
@@ -354,7 +405,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-    // Send the watering command to the TinyCircuits board
+    // Water plant
     fun waterPlant() {
 
         if (!isBluetoothReady) {
@@ -362,7 +413,6 @@ fun AuraPlantRootScreen() {
             return
         }
 
-        // Firmware recognises W:1, not R:WATER
         bluetoothManager.sendToPlant("W:1")
 
         val nextWater = (waterLevel + 1).coerceAtMost(5)
@@ -431,7 +481,7 @@ fun AuraPlantRootScreen() {
         )
     }
 
-    // Release resources when the screen is destroyed
+    // Release resources when screen is destroyed
     DisposableEffect(Unit) {
         onDispose {
             audioRecorder.releaseAll()
@@ -492,7 +542,7 @@ fun AuraPlantRootScreen() {
         }
     }
 
-    // Request microphone permission
+    // Microphone permission launcher
     val micPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -854,7 +904,7 @@ fun DashboardTabContent(
                 )
             }
 
-            // Single Water Plant button
+            // Water Plant button
             WaterPlantButton(
                 waterLevel = waterLevel,
                 onWaterPlant = onWaterPlant
@@ -894,7 +944,7 @@ fun DashboardTabContent(
                 waterLevel = waterLevel
             )
 
-            // Existing UI test button
+            // UI test button
             OutlinedButton(
                 onClick = onToggleMood,
                 modifier = Modifier.fillMaxWidth(),
