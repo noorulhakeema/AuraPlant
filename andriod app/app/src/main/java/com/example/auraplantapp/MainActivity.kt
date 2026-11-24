@@ -104,6 +104,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.Stroke
 import java.util.Calendar
+import androidx.compose.runtime.collectAsState
+import java.time.LocalDate
 
 
 enum class PlantInteractionEvent {
@@ -151,6 +153,140 @@ fun AuraPlantRootScreen() {
 
     val context = LocalContext.current
 
+
+    val storedDailyState by dailyPlantState(context)
+        .collectAsState(initial = null)
+
+    var today by remember {
+        mutableStateOf(LocalDate.now().toString())
+    }
+
+    var dailyDataLoaded by remember {
+        mutableStateOf(false)
+    }
+
+    var waterLevel by remember {
+        mutableIntStateOf(2)
+    }
+
+    var lightLevel by remember {
+        mutableIntStateOf(4)
+    }
+
+    var patCount by remember {
+        mutableIntStateOf(0)
+    }
+
+    var affirmationCount by remember {
+        mutableIntStateOf(0)
+    }
+
+    var dropCount by remember {
+        mutableIntStateOf(0)
+    }
+
+    var transcribedQuote by remember {
+        mutableStateOf("")
+    }
+
+    var plantResponseText by remember {
+        mutableStateOf("")
+    }
+
+    var plantMood by remember {
+        mutableStateOf("Content")
+    }
+
+    var plantHappiness by remember {
+        mutableIntStateOf(50)
+    }
+
+
+    LaunchedEffect(storedDailyState) {
+        val saved = storedDailyState ?: return@LaunchedEffect
+
+        if (saved.date == today) {
+            // Same day: restore the previous session
+            waterLevel = saved.waterLevel
+            lightLevel = saved.lightLevel
+            patCount = saved.patCount
+            affirmationCount = saved.affirmationCount
+            dropCount = saved.dropCount
+            transcribedQuote = saved.transcript
+            plantResponseText = saved.plantResponse
+            plantMood = saved.plantMood
+            plantHappiness = saved.happiness
+        } else {
+            // New day: reset daily values
+            waterLevel = 2
+            lightLevel = 4
+            patCount = 0
+            affirmationCount = 0
+            dropCount = 0
+            transcribedQuote = ""
+            plantResponseText = ""
+            plantMood = "Content"
+            plantHappiness = 50
+        }
+
+        dailyDataLoaded = true
+    }
+
+    LaunchedEffect(
+        dailyDataLoaded,
+        waterLevel,
+        lightLevel,
+        patCount,
+        affirmationCount,
+        dropCount,
+        transcribedQuote,
+        plantResponseText,
+        plantMood,
+        plantHappiness
+    ) {
+        if (dailyDataLoaded) {
+            saveDailyPlantState(
+                context,
+                DailyPlantState(
+                    date = today,
+                    waterLevel = waterLevel,
+                    lightLevel = lightLevel,
+                    patCount = patCount,
+                    affirmationCount = affirmationCount,
+                    dropCount = dropCount,
+                    transcript = transcribedQuote,
+                    plantResponse = plantResponseText,
+                    plantMood = plantMood,
+                    happiness = plantHappiness
+                )
+            )
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+
+            val newDate = LocalDate.now().toString()
+
+            if (newDate != today) {
+                today = newDate
+
+                waterLevel = 2
+                lightLevel = 4
+                patCount = 0
+                affirmationCount = 0
+                dropCount = 0
+
+                transcribedQuote = ""
+                plantResponseText = ""
+                plantMood = "Content"
+                plantHappiness = 50
+            }
+        }
+    }
+
+
 // Notification setting
     var notificationsEnabled by remember {
         mutableStateOf(true)
@@ -165,25 +301,8 @@ fun AuraPlantRootScreen() {
         mutableStateOf(PlantMood.SAD)
     }
 
-    var waterLevel by remember {
-        mutableIntStateOf(2)
-    }
 
     var wateringCount by remember {
-        mutableIntStateOf(0)
-    }
-
-    var dropCount by rememberSaveable {
-        mutableIntStateOf(0)
-    }
-
-    val lightLevel = 4
-
-    var patCount by rememberSaveable {
-        mutableIntStateOf(0)
-    }
-
-    var affirmationCount by rememberSaveable {
         mutableIntStateOf(0)
     }
 
@@ -391,9 +510,6 @@ fun AuraPlantRootScreen() {
         )
     }
 
-    var transcribedQuote by remember {
-        mutableStateOf("")
-    }
 
     var partialQuote by remember {
         mutableStateOf("")
@@ -405,18 +521,6 @@ fun AuraPlantRootScreen() {
     }
 
     val coroutineScope = rememberCoroutineScope()
-
-    var plantHappiness by remember {
-        mutableIntStateOf(50)
-    }
-
-    var plantMood by remember {
-        mutableStateOf("Content")
-    }
-
-    var plantResponseText by remember {
-        mutableStateOf("")
-    }
 
     var isAnalyzingQuote by remember {
         mutableStateOf(false)
@@ -1227,19 +1331,6 @@ fun DashboardTabContent(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-
-                Text(
-                    text = "PLANT STATUS",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextDark
-                )
-
-                Text(
-                    text = bluetoothStatus,
-                    color = TextDark,
-                    fontSize = 14.sp
-                )
 
                 if (lastDeviceMessage.isNotBlank()) {
                     Text(

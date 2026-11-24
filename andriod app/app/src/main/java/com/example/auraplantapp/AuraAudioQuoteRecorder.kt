@@ -1,139 +1,267 @@
+
 package com.example.auraplantapp
 
 import android.content.Context
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Build
+import android.util.Log
 import java.io.File
-import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AuraAudioQuoteRecorder(private val context: Context) {
+
     private var mediaRecorder: MediaRecorder? = null
     private var mediaPlayer: MediaPlayer? = null
     private var isRecording = false
+    private var activeRecordingFile: File? = null
+
+    companion object {
+        private const val TAG = "AuraAudioRecorder"
+    }
+
+    private fun getTodayDate(): String {
+        return SimpleDateFormat(
+            "yyyy-MM-dd",
+            Locale.getDefault()
+        ).format(Date())
+    }
 
     val quoteFile: File
-        get() = File(context.getExternalFilesDir(null) ?: context.filesDir, "daily_quote.m4a")
+        get() {
+            val directory = context.getExternalFilesDir(null)
+                ?: context.filesDir
 
-    fun hasRecordedQuote(): Boolean = quoteFile.exists() && quoteFile.length() > 0L
+            return File(
+                directory,
+                "daily_quote_${getTodayDate()}.m4a"
+            )
+        }
+
+    fun hasRecordedQuote(): Boolean {
+        return quoteFile.exists() && quoteFile.length() > 0L
+    }
 
     fun startRecording(): Boolean {
+
         if (isRecording) return true
+
         stopPlayback()
 
         val outputFile = quoteFile
-        if (outputFile.exists()) {
-            outputFile.delete()
-        }
 
-        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaRecorder(context)
-        } else {
-            @Suppress("DEPRECATION")
-            MediaRecorder()
-        }
-
-        return try {
-            recorder.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setOutputFile(outputFile.absolutePath)
-                prepare()
-                start()
+        try {
+            if (outputFile.exists()) {
+                outputFile.delete()
             }
+
+            val recorder = if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            ) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setOutputFile(outputFile.absolutePath)
+
+            recorder.prepare()
+            recorder.start()
+
             mediaRecorder = recorder
+            activeRecordingFile = outputFile
             isRecording = true
-            true
-        } catch (_: IOException) {
-            releaseRecorder()
-            false
-        } catch (_: IllegalStateException) {
-            releaseRecorder()
-            false
+
+            Log.d(TAG, "Recording started: ${outputFile.absolutePath}")
+
+            return true
+
+        } catch (e: Exception) {
+
+            Log.e(TAG, "Recording failed", e)
+
+            try {
+                mediaRecorder?.release()
+            } catch (_: Exception) {
+            }
+
+            mediaRecorder = null
+            activeRecordingFile = null
+            isRecording = false
+
+            return false
         }
     }
 
     fun stopRecording(): File? {
-        if (!isRecording) return if (hasRecordedQuote()) quoteFile else null
+
+        if (!isRecording) {
+            return if (hasRecordedQuote()) quoteFile else null
+        }
+
+        val recordingFile = activeRecordingFile
+
         return try {
-            mediaRecorder?.apply {
-                stop()
-                release()
-            }
+
+            mediaRecorder?.stop()
+            mediaRecorder?.release()
+
             mediaRecorder = null
+            activeRecordingFile = null
             isRecording = false
-            if (hasRecordedQuote()) quoteFile else null
-        } catch (_: RuntimeException) {
+
+            if (
+                recordingFile != null &&
+                recordingFile.exists() &&
+                recordingFile.length() > 0L
+            ) {
+                Log.d(
+                    TAG,
+                    "Recording saved: ${recordingFile.absolutePath}, size=${recordingFile.length()}"
+                )
+                recordingFile
+            } else {
+                Log.e(TAG, "Recording file is missing or empty")
+                null
+            }
+
+        } catch (e: Exception) {
+
+            Log.e(TAG, "Stopping recording failed", e)
+
             releaseRecorder()
             null
         }
     }
 
-    fun playRecordedQuote(onCompletion: () -> Unit = {}): Boolean {
-        if (!hasRecordedQuote() || isRecording) return false
+    fun playRecordedQuote(
+        onCompletion: () -> Unit = {}
+    ): Boolean {
+
+        if (!hasRecordedQuote() || isRecording) {
+            Log.e(TAG, "No valid recording available for playback")
+            return false
+        }
+
         stopPlayback()
 
         return try {
-            mediaPlayer = MediaPlayer().apply {
-                setDataSource(quoteFile.absolutePath)
-                setOnCompletionListener {
-                    stopPlayback()
-                    onCompletion()
-                }
-                prepare()
-                start()
+
+            val player = MediaPlayer()
+
+            mediaPlayer = player
+
+            player.setDataSource(quoteFile.absolutePath)
+
+            player.setOnCompletionListener {
+                stopPlayback()
+                onCompletion()
             }
+
+            player.setOnErrorListener { _, what, extra ->
+                Log.e(
+                    TAG,
+                    "Playback error: what=$what extra=$extra"
+                )
+                stopPlayback()
+                true
+            }
+
+            player.prepare()
+            player.start()
+
+            Log.d(TAG, "Audio playback started")
+
             true
-        } catch (_: Exception) {
+
+        } catch (e: Exception) {
+
+            Log.e(TAG, "Audio playback failed", e)
+
             stopPlayback()
             false
         }
     }
 
     fun stopPlayback() {
+
         try {
             mediaPlayer?.stop()
         } catch (_: Exception) {
         }
-        mediaPlayer?.release()
+
+        try {
+            mediaPlayer?.release()
+        } catch (_: Exception) {
+        }
+
         mediaPlayer = null
     }
 
     private fun releaseRecorder() {
+
         try {
             mediaRecorder?.release()
         } catch (_: Exception) {
         }
+
         mediaRecorder = null
+        activeRecordingFile = null
         isRecording = false
     }
 
     fun releaseAll() {
-        stopRecording()
+        if (isRecording) {
+            stopRecording()
+        }
+
         stopPlayback()
     }
 
     fun getRecordedDurationLabel(): String {
+
         if (!hasRecordedQuote()) return "0:00"
+
         val player = MediaPlayer()
+
         return try {
+
             player.setDataSource(quoteFile.absolutePath)
             player.prepare()
-            val totalSeconds = (player.duration / 1000).coerceAtLeast(0)
+
+            val totalSeconds =
+                (player.duration / 1000).coerceAtLeast(0)
+
             val mins = totalSeconds / 60
             val secs = totalSeconds % 60
+
             "%d:%02d".format(mins, secs)
-        } catch (_: Exception) {
+
+        } catch (e: Exception) {
+
+            Log.e(TAG, "Could not read audio duration", e)
             "Audio"
+
         } finally {
             player.release()
         }
     }
 
     fun getRecordedTimestampLabel(): String {
+
         if (!hasRecordedQuote()) return ""
-        val formatter = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
-        return formatter.format(java.util.Date(quoteFile.lastModified()))
+
+        val formatter = SimpleDateFormat(
+            "MMM d, HH:mm",
+            Locale.getDefault()
+        )
+
+        return formatter.format(Date(quoteFile.lastModified()))
     }
 }
