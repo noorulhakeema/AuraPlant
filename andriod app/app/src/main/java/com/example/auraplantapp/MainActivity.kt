@@ -1164,19 +1164,6 @@ fun DashboardTabContent(
                 modifier = Modifier.fillMaxWidth()
             ) {
 
-                Text(
-                    text = "PLANT STATUS",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextDark
-                )
-
-                Text(
-                    text = bluetoothStatus,
-                    color = TextDark,
-                    fontSize = 14.sp
-                )
-
                 if (lastDeviceMessage.isNotBlank()) {
                     Text(
                         text = "Device says: $lastDeviceMessage",
