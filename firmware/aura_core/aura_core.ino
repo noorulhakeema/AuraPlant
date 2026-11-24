@@ -1,5 +1,5 @@
-// AuraPlant Core v5: Vitality system + LIVE TUNING + ACCELEROMETER WATCH + approved SmoothOrange display
-// Keep AuraApprovedDisplay.h and AuraFrames.h (teammate's files, unchanged) in the same sketch folder.
+// AuraPlant v6: vitality + live tuning + accelerometer + approved SmoothOrange display
+// Needs AuraApprovedDisplay.h and AuraFrames.h (teammate's files) in this same sketch folder.
 // Serial Monitor must be set to "Newline". Type "help" for the command list.
 #include <SPI.h>
 #include <STBLE.h>
@@ -18,37 +18,43 @@ ServoDriver servo2(NO_R_REMOVED);
 
 #define SerialMonitorInterface SerialUSB
 
-// ================= TUNABLE VALUES (changed live with "set name value") =================
+// ================= TUNABLE VALUES (change live with "set name value") =================
+// Servo travel. Find YOUR real limits with the "g" command, then stay ~100 us inside them.
 int restUs      = 900;    // lowest (drooped)
 int happyUs     = 2100;   // highest (fully up)
-int compStep    = 20;     // each compliment adds this much vitality (out of 100)
 
-int waterUs     = 2100;   // how high water lifts the plant (max is 2100)
-int waterRise   = 1800;   // time to rise (ms). Matches the display's 1800 ms "fill"
-int waterHold   = 10000;  // how long it stays up (ms). Matches the display's 10 s "hold"
+// WATER: rise to the top, stay 5 s, then glide down
+int waterUs     = 2100;
+int waterRise   = 900;    // ms to reach the top
+int waterHold   = 5000;   // ms it stays at the top before coming down
 
-int patLift     = 300;    // pat lifts the plant this much (us) above its normal height
-int patRise     = 600;    // time to rise on a pat (ms)
-int patHold     = 3000;   // how long it stays lifted (ms), happy face meanwhile
+// COMPLIMENT: rise to the top FASTER and stay LONGER than water
+int compUs      = 2100;
+int compRise    = 400;
+int compHold    = 8000;
+int compStep    = 20;     // vitality gained per compliment (out of 100)
 
-int lightPct    = 50;     // in bright light the plant rises to this % of its range (50 = half)
-int dizLow      = 900;
-int dizHigh     = 2100;
-int dizMs       = 350;
+// PAT: small wiggle around where it is, then return to the same height
+int patAmp      = 150;    // wiggle size in us either side
+int patStepMs   = 140;    // time for each half-wiggle
+int patWigMs    = 900;    // total wiggle time
+
+// SHAKE: dizzy for dizDur ms, wiggling a little around where it is
+int dizAmp      = 250;
+int dizMs       = 300;
 int dizDur      = 3000;
-int compMs      = 500;
-int returnMs    = 1500;
-int tippedUs    = 1000;
 
-// Accelerometer thresholds (tune with the "a" watch mode)
-int spikeDelta  = 60;     // a reading change bigger than this counts as ONE bump
-int shakeN      = 4;      // this many bumps close together = shake (dizzy)
-                          // 1 or 2 bumps then quiet = pat
+int returnMs    = 1500;   // time to glide back down to its normal height
+int tippedUs    = 1000;
+int lightPct    = 50;     // in bright light the plant rises to this % of its range
+
+// Accelerometer (tune with the "a" watch mode)
+int spikeDelta  = 60;     // a reading change bigger than this = ONE bump
+int shakeN      = 4;      // this many bumps close together = shake; 1-2 bumps then quiet = pat
 
 // Behaviour
 unsigned long DECAY_INTERVAL = 5000;
 unsigned long CARE_GRACE     = 10000;
-unsigned long thirstyMs      = 120000;   // no water for this long -> thirsty face (0 = never thirsty)
 float DECAY_NORMAL = 3.0f;
 float DECAY_BRIGHT = 1.0f;
 float DECAY_DARK   = 5.0f;
@@ -56,26 +62,26 @@ float LIGHT_DARK   = 10.0f;
 float LIGHT_GOOD   = 50.0f;
 
 const long ONE_G = 256;
-const int ACCEL_PRINT_FLOOR = 10;   // watch mode ignores changes smaller than this (noise)
+const int ACCEL_PRINT_FLOOR = 10;
 
-const int SERVO_CHANNEL   = 2;
-const int SERVO_MIN_LIMIT = 900;
-const int SERVO_MAX_LIMIT = 2100;
+const int SERVO_CHANNEL     = 2;
+const int SERVO_MIN_LIMIT   = 900;
+const int SERVO_MAX_LIMIT   = 2100;
 const unsigned long SERVO_STEP_MS = 20;
-const int SERVO_DEADBAND_US = 15;
+const int SERVO_DEADBAND_US = 15;    // ignore commands smaller than this
+const int IDLE_DEADBAND_US  = 60;    // resting height only follows vitality when it changed this much
 
-// Face IDs used by the approved display (these index the display's own face table)
+// Face IDs understood by the approved display (these index its own face table)
 const int FACE_HAPPY      = 0;
 const int FACE_CONTENT    = 1;
 const int FACE_SAD        = 2;
-const int FACE_THIRSTY    = 3;
 const int FACE_DIZZY      = 4;
 const int FACE_NEED_LIGHT = 5;
 const int FACE_NEUTRAL    = 6;
 
 // ================= STATE =================
 bool tuneMode = false;
-bool accelDebug = false;          // "a" toggles: print accelerometer numbers
+bool accelDebug = false;
 String cmdLine = "";
 
 UBMA250 accel;
@@ -84,7 +90,7 @@ int lastAx = 0, lastAy = 0, lastAz = 0;
 unsigned long lastAccelRead = 0;
 unsigned long lastSpike = 0;
 int spikeCount = 0;
-int burstPeak = 0;                // biggest delta in the current burst
+int burstPeak = 0;
 unsigned long accelLockUntil = 0;
 int upX = 0, upY = 0, upZ = 0;
 int freefallCount = 0;
@@ -100,7 +106,7 @@ uint8_t ble_connection_state = false;
 TSL2572 light_sensor;
 TinyScreen display = TinyScreen(TinyScreenPlus);
 float lastLux = 20.0f;
-bool lightBright = false;         // true while there is sufficient light
+bool lightBright = false;
 unsigned long lastLightRead = 0;
 unsigned long lastBleLight = 0;
 unsigned long lastBleSend = 2500;
@@ -108,13 +114,9 @@ unsigned long lastBleSend = 2500;
 float vitality = 60.0f;
 unsigned long lastDecay = 0;
 unsigned long lastCare = 0;
-unsigned long lastWatered = 0;
-unsigned long lastInteraction = 0;   // for the 10 minute sleep
-unsigned long nextIdleAnim = 20000;  // next little idle animation (wink / look / wiggle)
 
 int lastFace = -1;                // the display helper also reads/writes this
 unsigned long dizzyUntil = 0;     // the display helper also reads this
-unsigned long heartUntil = 0;     // pat: happy face while lifted
 unsigned long happyUntil = 0;
 unsigned long nextBlink = 4000;
 unsigned long blinkEnd = 0;
@@ -129,23 +131,19 @@ unsigned long lastServoStep = 0;
 unsigned long lastServoMove = 0;
 unsigned long lastServoCmd = 0;
 unsigned long wiggleUntil = 0;
-unsigned long holdUntil = 0;      // servo stays where it is until this time (water hold)
+unsigned long holdUntil = 0;      // servo stays where it is until this time
 int wiggleLow = 900;
 int wiggleHigh = 2100;
 bool wiggleDir = true;
-unsigned long wiggleStepMs = 900;
+unsigned long wiggleStepMs = 300;
 bool servoOk = false;
 
 // Teammate's display helper. Must come AFTER display, lastFace and dizzyUntil are declared.
 #include "AuraApprovedDisplay.h"
 
-// Call whenever the plant is "touched" (care, pat, shake...). Resets the sleep timer and wakes it up.
+// Wake the screen if it was sleeping
 void markInteraction() {
-  lastInteraction = millis();
-  if (auraScene == AURA_SLEEP) {
-    auraWakeDisplay();
-    auraStartThink();                 // "just woke" animation
-  }
+  if (auraScene == AURA_SLEEP) auraWakeDisplay();
 }
 
 // ================= SERVO =================
@@ -181,6 +179,7 @@ void servoUpdate() {
       lastServoMove = now;
     }
   }
+  // keep-alive so the controller's 1000 ms failsafe never switches the PWM off
   if (now - lastServoCmd > 400) servoWrite(servoPos);
 }
 
@@ -188,8 +187,7 @@ int vitalityToServo() {
   return restUs + (int)((happyUs - restUs) * (vitality / 100.0f));
 }
 
-// The plant's normal height: follows vitality, but in bright light it is
-// never lower than lightPct% of the range (50 = halfway up).
+// Normal height: follows vitality, but in bright light never lower than lightPct% of the range.
 int restingHeight() {
   int h = vitalityToServo();
   if (lightBright) {
@@ -199,14 +197,21 @@ int restingHeight() {
   return h;
 }
 
+bool isTipped() { return fellOver || fakeTip; }
+
+// Glide to the normal height. Small vitality changes are ignored so the servo does not
+// keep twitching every few seconds (that twitching also fed false readings to the accelerometer).
+void followResting(bool force) {
+  int goal = isTipped() ? tippedUs : restingHeight();
+  if (force || abs(goal - servoTarget) > IDLE_DEADBAND_US) servoGoTo(goal, returnMs);
+}
+
 // ================= VITALITY =================
 void addVitality(float amount) {
   vitality += amount;
   if (vitality > 100.0f) vitality = 100.0f;
   if (vitality < 0.0f) vitality = 0.0f;
 }
-
-bool isTipped() { return fellOver || fakeTip; }
 
 void updateVitality() {
   unsigned long now = millis();
@@ -221,75 +226,77 @@ void updateVitality() {
 }
 
 // ================= REACTIONS =================
-void reactCompliment() {
-  bool alreadyMax = (vitality >= 99.5f);
-  markInteraction();
-  addVitality(compStep);                    // every compliment raises it a bit more
-  lastCare = millis();
-  happyUntil = millis() + 3000;
-  dizzyUntil = 0;                           // a kind word cheers it up
-  wiggleUntil = 0;
-  auraStartExcited();                       // display: excited burst
-
-  if (millis() < holdUntil) return;         // water hold in progress: it will glide to the new height after
-
-  if (alreadyMax) {                         // can't go higher: a quick happy bounce instead
-    wiggleLow = happyUs - 150;
-    wiggleHigh = happyUs;
-    wiggleStepMs = 250;
-    wiggleDir = false;                      // false = currently at the top, so it dips first
-    wiggleUntil = millis() + 400;
-    servoGoTo(wiggleLow, 250);
-  } else {
-    servoGoTo(restingHeight(), compMs);     // rise to the new, higher height
-  }
-}
-
+// WATER: rise to the top, stay waterHold ms, then glide down. Screen: fill -> hold -> drain.
 void reactWater() {
   markInteraction();
+  unsigned long now = millis();
+  unsigned long until = now + (unsigned long)waterRise + (unsigned long)waterHold;
   addVitality(30);
-  lastCare = millis();
-  lastWatered = millis();
-  happyUntil = millis() + waterRise + waterHold;   // happy face after the animation if still within this time
-  wiggleUntil = 0;                                  // no sway
-  holdUntil = millis() + waterRise + waterHold;     // stay up, then glide back to normal
+  lastCare = now;
+  dizzyUntil = 0;
+  wiggleUntil = 0;
+  happyUntil = until;
+  holdUntil = max(holdUntil, until);
   servoGoTo(waterUs, waterRise);
-  auraStartWater();                                 // display: fill -> hold 10 s -> drain
+  auraStartWater();
 }
 
+// COMPLIMENT: rise to the top faster than water and stay longer. Screen: excited, then very happy.
+void reactCompliment() {
+  markInteraction();
+  unsigned long now = millis();
+  unsigned long until = now + (unsigned long)compRise + (unsigned long)compHold;
+  addVitality(compStep);
+  lastCare = now;
+  dizzyUntil = 0;
+  wiggleUntil = 0;
+  happyUntil = until;
+  holdUntil = max(holdUntil, until);
+  servoGoTo(compUs, compRise);
+  auraStartExcited();
+}
+
+// PAT: little wiggle around the current height, then back to where it was. Screen: suddenly excited.
 void reactPat() {
   markInteraction();
-  heartUntil = millis() + patRise + patHold;       // happy face while lifted
-  addVitality(5);
-  lastCare = millis();
-  auraStartExcited();                              // display: excited burst, then happy face
-  if (millis() >= holdUntil) {                     // don't override a water hold
-    wiggleUntil = 0;
-    holdUntil = millis() + patRise + patHold;
-    servoGoTo(restingHeight() + patLift, patRise);
+  unsigned long now = millis();
+  lastCare = now;
+  happyUntil = now + (unsigned long)patWigMs + 1500UL;
+  auraStartExcited();
+  if (now >= holdUntil) {                       // not while it is holding up from water/compliment
+    int base = servoPos;
+    wiggleLow  = max(base - patAmp, SERVO_MIN_LIMIT);
+    wiggleHigh = min(base + patAmp, SERVO_MAX_LIMIT);
+    wiggleStepMs = patStepMs;
+    wiggleDir = true;
+    wiggleUntil = now + patWigMs;
+    accelLockUntil = now + patWigMs + 900;      // its own wiggle must not count as another touch
+    servoGoTo(wiggleHigh, patStepMs);
   }
 }
 
+// SHAKE / FALL: dizzy for dizDur ms
 void reactDizzy() {
   markInteraction();
-  dizzyUntil = millis() + dizDur;
+  unsigned long now = millis();
+  int base = servoPos;
+  dizzyUntil = now + dizDur;
   holdUntil = 0;
   addVitality(-5);
-  wiggleLow = dizLow;
-  wiggleHigh = dizHigh;
+  wiggleLow  = max(base - dizAmp, SERVO_MIN_LIMIT);
+  wiggleHigh = min(base + dizAmp, SERVO_MAX_LIMIT);
   wiggleStepMs = dizMs;
-  wiggleUntil = millis() + dizDur;
   wiggleDir = true;
+  wiggleUntil = now + dizDur;
+  accelLockUntil = now + dizDur + 1200;         // ignore the vibration it causes itself
   servoGoTo(wiggleHigh, dizMs);
 }
 
 // ================= FACE =================
-// Returns one of the FACE_* IDs. Priority matches the approved display logic.
 int chooseFace() {
   unsigned long now = millis();
   if (isTipped() || now < dizzyUntil) return FACE_DIZZY;
-  if (now < heartUntil || now < happyUntil) return FACE_HAPPY;
-  if (thirstyMs > 0 && now - lastWatered > thirstyMs) return FACE_THIRSTY;
+  if (now < happyUntil) return FACE_HAPPY;
   if (lastLux < LIGHT_DARK) return FACE_NEED_LIGHT;
   if (vitality >= 70) return FACE_CONTENT;
   if (vitality >= 40) return FACE_NEUTRAL;
@@ -297,7 +304,7 @@ int chooseFace() {
 }
 
 void drawEyes(bool open) {
-  if (lastFace == FACE_DIZZY) return;      // dizzy keeps its spiral eyes
+  if (lastFace == FACE_DIZZY) return;
   auraDrawLegacyFace(lastFace, !open);
 }
 
@@ -316,7 +323,6 @@ void updateBlink() {
   }
 }
 
-// Only redraws when the face changes. Does nothing while an animation is playing.
 void updateFace() {
   if (auraAnimationActive()) return;
   int f = chooseFace();
@@ -324,25 +330,6 @@ void updateFace() {
     lastFace = f;
     blinking = false;
     auraDrawLegacyFace(f, false);
-  }
-}
-
-// Little idle animations so the plant feels alive, and sleep after 10 minutes with no interaction
-void updateIdleAnims() {
-  unsigned long now = millis();
-  if (auraAnimationActive() || isTipped() || now < dizzyUntil) return;
-  if (tuneMode) { lastInteraction = now; return; }       // never sleep while tuning
-  if (now - lastInteraction >= AURA_IDLE_SLEEP_MS) { auraStartSleeping(); return; }
-  if (now < nextIdleAnim) return;
-  nextIdleAnim = now + 20000 + (now % 20000);            // every 20-40 s
-  if (lastFace == FACE_CONTENT) {
-    switch ((now / 100) % 3) {
-      case 0:  auraStartWink();   break;
-      case 1:  auraStartLook();   break;
-      default: auraStartWiggle(); break;
-    }
-  } else if (lastFace == FACE_NEUTRAL) {
-    auraStartLook();
   }
 }
 
@@ -388,17 +375,23 @@ void updateAccel() {
   int delta = abs(ax - lastAx) + abs(ay - lastAy) + abs(az - lastAz);
   lastAx = ax; lastAy = ay; lastAz = az;
 
-  // ---- WATCH MODE: print every meaningful change ----
+  // The servo moving (or having just stopped) shakes the whole body.
+  // While that is happening, never count it as a touch, a fall or a shake.
+  bool servoBusy = (servoPos != servoTarget) || (now - lastServoMove < 700) || (now < wiggleUntil);
+
   if (accelDebug && delta >= ACCEL_PRINT_FLOOR) {
     SerialMonitorInterface.print("delta=");
     SerialMonitorInterface.print(delta);
-    if (delta > spikeDelta) SerialMonitorInterface.print("   <-- counts as a BUMP (spikeDelta=" + String(spikeDelta) + ")");
+    if (servoBusy) SerialMonitorInterface.print("   (servo busy, ignored)");
+    else if (delta > spikeDelta) SerialMonitorInterface.print("   <-- counts as a BUMP (spikeDelta=" + String(spikeDelta) + ")");
     SerialMonitorInterface.println();
   }
 
   // ---- Free fall ----
   long mag2 = (long)ax * ax + (long)ay * ay + (long)az * az;
-  if (mag2 < (ONE_G * 4 / 10) * (ONE_G * 4 / 10)) {
+  if (servoBusy) {
+    freefallCount = 0;
+  } else if (mag2 < (ONE_G * 4 / 10) * (ONE_G * 4 / 10)) {
     freefallCount++;
   } else {
     if (freefallCount >= 2) {
@@ -431,16 +424,9 @@ void updateAccel() {
     }
   }
 
-  // While tipped (or fake-tipped) keep the dizzy face and stop animations from covering it
-  if (isTipped()) dizzyUntil = now + 500;
+  if (now < accelLockUntil || servoBusy || isTipped()) { spikeCount = 0; burstPeak = 0; return; }
 
-  if (now < accelLockUntil) { spikeCount = 0; burstPeak = 0; return; }
-  if (isTipped()) { spikeCount = 0; burstPeak = 0; return; }
-
-  // The servo's own vibration must not count as a touch
-  bool servoShaking = (now - lastServoMove < 250) || (now < wiggleUntil);
-
-  if (delta > spikeDelta && !servoShaking) {
+  if (delta > spikeDelta) {
     if (now - lastSpike > 600) { spikeCount = 0; burstPeak = 0; }   // new burst
     spikeCount++;
     if (delta > burstPeak) burstPeak = delta;
@@ -460,7 +446,7 @@ void updateAccel() {
     return;
   }
 
-  // Burst finished (quiet for 500 ms)
+  // Burst finished (quiet for 500 ms): 1-2 bumps = pat
   if (spikeCount > 0 && now - lastSpike > 500) {
     if (spikeCount <= 2) {
       SerialMonitorInterface.print("E:PAT  (bumps=");
@@ -499,42 +485,37 @@ void printHelp() {
   SerialMonitorInterface.println(F("---- COMMANDS (type then press Enter) ----"));
   SerialMonitorInterface.println(F("t            toggle TUNE MODE (freezes decay + reactions; accel only prints)"));
   SerialMonitorInterface.println(F("a            toggle ACCEL WATCH (prints numbers while you pat/shake)"));
-  SerialMonitorInterface.println(F("g 1500       move servo to 1500 us"));
+  SerialMonitorInterface.println(F("g 1500       move servo to 1500 us (use this to find your real min/max)"));
   SerialMonitorInterface.println(F("f            glide back to the height matching vitality"));
   SerialMonitorInterface.println(F("v 50         set vitality to 50"));
   SerialMonitorInterface.println(F("w h p d u    water, compliment, pat, dizzy, toggle tipped"));
-  SerialMonitorInterface.println(F("x NAME       preview a display animation:"));
+  SerialMonitorInterface.println(F("i            scan I2C (if the servo controller is missing here, it reset = power problem)"));
+  SerialMonitorInterface.println(F("x NAME       preview a screen animation:"));
   SerialMonitorInterface.println(F("             wink look think wiggle excited talk sleep sun water"));
-  SerialMonitorInterface.println(F("set NAME N   e.g. set spike 80"));
-  SerialMonitorInterface.println(F("   names: rest happy waterUs waterRise waterHold dizLow dizHigh"));
-  SerialMonitorInterface.println(F("          dizMs dizDur compMs returnMs tipped spike shakeN"));
-  SerialMonitorInterface.println(F("          patLift patRise patHold lightPct lightGood lightDark compStep thirstyMs"));
+  SerialMonitorInterface.println(F("set NAME N   e.g. set compHold 9000"));
+  SerialMonitorInterface.println(F("   names: rest happy waterUs waterRise waterHold compUs compRise compHold compStep"));
+  SerialMonitorInterface.println(F("          patAmp patStepMs patWigMs dizAmp dizMs dizDur returnMs tipped"));
+  SerialMonitorInterface.println(F("          spike shakeN lightPct lightGood lightDark"));
   SerialMonitorInterface.println(F("l            print the current light reading (lux)"));
   SerialMonitorInterface.println(F("show         print all values as code to paste into the sketch"));
 }
 
+void printInt(const char* name, long v) {
+  SerialMonitorInterface.print("int "); SerialMonitorInterface.print(name);
+  SerialMonitorInterface.print(" = "); SerialMonitorInterface.print(v);
+  SerialMonitorInterface.println(";");
+}
+
 void printValues() {
   SerialMonitorInterface.println(F("---- PASTE THESE over the matching lines at the top of the sketch ----"));
-  SerialMonitorInterface.print("int restUs   = "); SerialMonitorInterface.print(restUs);   SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int happyUs  = "); SerialMonitorInterface.print(happyUs);  SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int waterUs   = "); SerialMonitorInterface.print(waterUs);   SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int waterRise = "); SerialMonitorInterface.print(waterRise); SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int waterHold = "); SerialMonitorInterface.print(waterHold); SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int dizLow   = "); SerialMonitorInterface.print(dizLow);   SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int dizHigh  = "); SerialMonitorInterface.print(dizHigh);  SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int dizMs    = "); SerialMonitorInterface.print(dizMs);    SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int dizDur   = "); SerialMonitorInterface.print(dizDur);   SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int compMs   = "); SerialMonitorInterface.print(compMs);   SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int returnMs = "); SerialMonitorInterface.print(returnMs); SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int tippedUs = "); SerialMonitorInterface.print(tippedUs); SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int spikeDelta = "); SerialMonitorInterface.print(spikeDelta); SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int shakeN   = "); SerialMonitorInterface.print(shakeN);   SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int patLift   = "); SerialMonitorInterface.print(patLift);  SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int patRise   = "); SerialMonitorInterface.print(patRise);  SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int patHold   = "); SerialMonitorInterface.print(patHold);  SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int lightPct  = "); SerialMonitorInterface.print(lightPct); SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("int compStep  = "); SerialMonitorInterface.print(compStep); SerialMonitorInterface.println(";");
-  SerialMonitorInterface.print("unsigned long thirstyMs = "); SerialMonitorInterface.print(thirstyMs); SerialMonitorInterface.println(";");
+  printInt("restUs", restUs);       printInt("happyUs", happyUs);
+  printInt("waterUs", waterUs);     printInt("waterRise", waterRise);   printInt("waterHold", waterHold);
+  printInt("compUs", compUs);       printInt("compRise", compRise);     printInt("compHold", compHold);
+  printInt("compStep", compStep);
+  printInt("patAmp", patAmp);       printInt("patStepMs", patStepMs);   printInt("patWigMs", patWigMs);
+  printInt("dizAmp", dizAmp);       printInt("dizMs", dizMs);           printInt("dizDur", dizDur);
+  printInt("returnMs", returnMs);   printInt("tippedUs", tippedUs);     printInt("lightPct", lightPct);
+  printInt("spikeDelta", spikeDelta); printInt("shakeN", shakeN);
   SerialMonitorInterface.print("float LIGHT_GOOD = "); SerialMonitorInterface.print(LIGHT_GOOD); SerialMonitorInterface.println("f;");
   SerialMonitorInterface.print("float LIGHT_DARK = "); SerialMonitorInterface.print(LIGHT_DARK); SerialMonitorInterface.println("f;");
 }
@@ -545,6 +526,7 @@ void handleCommand(String line) {
 
   if (line == "help") { printHelp(); return; }
   if (line == "show") { printValues(); return; }
+  if (line == "i") { scanI2C("I2C now"); return; }
   if (line == "t") {
     tuneMode = !tuneMode;
     SerialMonitorInterface.println(tuneMode ? "TUNE MODE ON (frozen; accel only prints)" : "TUNE MODE OFF (normal)");
@@ -571,7 +553,7 @@ void handleCommand(String line) {
   if (line == "f") {
     wiggleUntil = 0;
     holdUntil = 0;
-    servoGoTo(restingHeight(), returnMs);
+    followResting(true);
     SerialMonitorInterface.print("returning to "); SerialMonitorInterface.println(restingHeight());
     return;
   }
@@ -617,23 +599,23 @@ void handleCommand(String line) {
     else if (name == "waterUs") waterUs = val;
     else if (name == "waterRise") waterRise = val;
     else if (name == "waterHold") waterHold = val;
-    else if (name == "dizLow") dizLow = val;
-    else if (name == "dizHigh") dizHigh = val;
+    else if (name == "compUs") compUs = val;
+    else if (name == "compRise") compRise = val;
+    else if (name == "compHold") compHold = val;
+    else if (name == "compStep") compStep = val;
+    else if (name == "patAmp") patAmp = val;
+    else if (name == "patStepMs") patStepMs = val;
+    else if (name == "patWigMs") patWigMs = val;
+    else if (name == "dizAmp") dizAmp = val;
     else if (name == "dizMs") dizMs = val;
     else if (name == "dizDur") dizDur = val;
-    else if (name == "compMs") compMs = val;
     else if (name == "returnMs") returnMs = val;
     else if (name == "tipped") tippedUs = val;
     else if (name == "spike") spikeDelta = val;
     else if (name == "shakeN") shakeN = val;
-    else if (name == "patLift") patLift = val;
-    else if (name == "patRise") patRise = val;
-    else if (name == "patHold") patHold = val;
     else if (name == "lightPct") lightPct = val;
     else if (name == "lightGood") LIGHT_GOOD = val;
     else if (name == "lightDark") LIGHT_DARK = val;
-    else if (name == "compStep") compStep = val;
-    else if (name == "thirstyMs") thirstyMs = (unsigned long)val;
     else ok = false;
     if (ok) { SerialMonitorInterface.print(name); SerialMonitorInterface.print(" = "); SerialMonitorInterface.println(val); }
     else SerialMonitorInterface.println("unknown name, type help");
@@ -666,8 +648,9 @@ void setup() {
   display.begin();
   display.setBitDepth(TSBitDepth8);
   display.setColorMode(TSColorModeBGR);
-  display.setFlip(true);            // if the picture is upside down, change to false
+  display.setFlip(false);            // if the picture is upside down, change to false
   display.setBrightness(7);
+  auraDrawLegacyFace(FACE_CONTENT, false);   // show a face right away
 
   accel.begin(BMA250_range_2g, BMA250_update_time_16ms);
   scanI2C("before servo");
@@ -697,8 +680,6 @@ void setup() {
     SerialMonitorInterface.println("Servo controller NOT detected!");
   }
 
-  lastWatered = millis();           // don't start out thirsty
-  lastInteraction = millis();
   auraStartThink();                 // little "just woke up" animation on power-on
   printHelp();
 }
@@ -710,22 +691,27 @@ void loop() {
   readSerialCommands();
   servoUpdate();
   updateAccel();                    // always runs (prints only, in tune mode)
-  auraTick();                       // advances the current display animation
+
+  if (isTipped()) dizzyUntil = now + 500;   // keep the dizzy face, stop animations covering it
+  if (tuneMode) auraLastActivity = now;     // never fall asleep while tuning
+  auraTick();                               // advances the current screen animation
   updateFace();
   updateBlink();
-  updateIdleAnims();
 
   if (!tuneMode) updateVitality();
 
-  if (now < wiggleUntil) {
+  // Servo: wiggle (pat / dizzy) -> otherwise hold -> otherwise glide to the normal height
+  static bool wasWiggling = false;
+  bool wiggling = now < wiggleUntil;
+  if (wiggling) {
     if (servoPos == servoTarget) {
       wiggleDir = !wiggleDir;
       servoGoTo(wiggleDir ? wiggleHigh : wiggleLow, wiggleStepMs);
     }
   } else if (!tuneMode && now >= holdUntil) {
-    if (isTipped()) servoGoTo(tippedUs, returnMs);
-    else servoGoTo(restingHeight(), returnMs);
+    followResting(wasWiggling);     // after a wiggle always return to the normal height
   }
+  wasWiggling = wiggling;
 
   aci_loop();
   handleIncoming();
@@ -743,10 +729,9 @@ void loop() {
       SerialMonitorInterface.print(lightBright ? "LIGHT: sufficient (lux=" : "LIGHT: not enough (lux=");
       SerialMonitorInterface.print(lastLux);
       SerialMonitorInterface.println(")");
-      // light just became sufficient: sun rays sweep in
       if (lightBright && !firstLuxRead && !tuneMode) {
         markInteraction();
-        auraStartSunlight();
+        auraStartSunlight();        // sun rays sweep in
       }
     }
     firstLuxRead = false;
