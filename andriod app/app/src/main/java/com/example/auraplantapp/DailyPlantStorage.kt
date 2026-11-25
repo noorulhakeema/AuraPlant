@@ -14,15 +14,15 @@ private val Context.dailyDataStore by preferencesDataStore(
 
 data class DailyPlantState(
     val date: String = "",
-    val waterLevel: Int = 2,
-    val lightLevel: Int = 4,
+    val waterLevel: Int = 0,
+    val lightLevel: Int = 0,
     val patCount: Int = 0,
     val affirmationCount: Int = 0,
     val dropCount: Int = 0,
     val transcript: String = "",
     val plantResponse: String = "",
-    val plantMood: String = "Content",
-    val happiness: Int = 50
+    val plantMood: String = "Sad",
+    val happiness: Int = 0
 )
 
 private object DailyKeys {
@@ -42,15 +42,15 @@ fun dailyPlantState(context: Context) =
     context.dailyDataStore.data.map { preferences ->
         DailyPlantState(
             date = preferences[DailyKeys.date] ?: "",
-            waterLevel = preferences[DailyKeys.water] ?: 2,
-            lightLevel = preferences[DailyKeys.light] ?: 4,
+            waterLevel = preferences[DailyKeys.water] ?: 0,
+            lightLevel = preferences[DailyKeys.light] ?: 0,
             patCount = preferences[DailyKeys.pats] ?: 0,
             affirmationCount = preferences[DailyKeys.affirmations] ?: 0,
             dropCount = preferences[DailyKeys.drops] ?: 0,
             transcript = preferences[DailyKeys.transcript] ?: "",
             plantResponse = preferences[DailyKeys.response] ?: "",
-            plantMood = preferences[DailyKeys.mood] ?: "Content",
-            happiness = preferences[DailyKeys.happiness] ?: 50
+            plantMood = preferences[DailyKeys.mood] ?: "Sad",
+            happiness = preferences[DailyKeys.happiness] ?: 0
         )
     }
 

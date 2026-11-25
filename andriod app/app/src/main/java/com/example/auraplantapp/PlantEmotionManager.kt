@@ -18,14 +18,17 @@ object PlantEmotionManager {
         val amount = abs(analysis.emotionChange)
             .coerceIn(0, 15)
 
-        val change = when (analysis.sentiment) {
-            "positive" -> amount
-            "negative" -> -amount
+        val change = when {
+            analysis.sentiment == "positive" &&
+                    analysis.validAffirmation -> amount
+
+            analysis.sentiment == "negative" -> -amount
+
             else -> 0
         }
 
-        val newHappiness =
-            (currentHappiness + change).coerceIn(0, 100)
+        val newHappiness = (currentHappiness + change)
+            .coerceIn(0, 100)
 
         val newMood = when {
             newHappiness >= 70 -> "Happy"

@@ -80,6 +80,11 @@ import com.example.auraplantapp.ui.theme.SageHeader
 import com.example.auraplantapp.ui.theme.TerracottaBox
 import com.example.auraplantapp.ui.theme.TextDark
 import com.example.auraplantapp.ui.theme.WarmCreamBg
+import com.example.auraplantapp.data.PlantDatabase
+import com.example.auraplantapp.data.PlantRepository
+import com.example.auraplantapp.data.PlantViewModel
+import com.example.auraplantapp.data.PlantViewModelFactory
+import com.example.auraplantapp.data.DailyRecord
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -93,12 +98,18 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 
+import androidx.lifecycle.viewmodel.compose.viewModel
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 
 import java.util.Calendar
 import java.time.LocalDate
+import java.time.YearMonth
 
 
 enum class PlantInteractionEvent {
@@ -140,6 +151,24 @@ fun AuraPlantRootScreen() {
 
     val context = LocalContext.current
 
+    val plantViewModel: PlantViewModel = viewModel(
+        factory = remember(context) {
+            PlantViewModelFactory(
+                PlantRepository(
+                    PlantDatabase.get(context).dailyRecordDao()
+                )
+            )
+        }
+    )
+
+    val currentMonth = remember {
+        YearMonth.now()
+    }
+
+    val monthlyRecords by plantViewModel
+        .month(currentMonth)
+        .collectAsState(initial = emptyList())
+
     val storedDailyState by dailyPlantState(context)
         .collectAsState(initial = null)
 
@@ -152,11 +181,11 @@ fun AuraPlantRootScreen() {
     }
 
     var waterLevel by remember {
-        mutableIntStateOf(2)
+        mutableIntStateOf(0)
     }
 
     var lightLevel by remember {
-        mutableIntStateOf(4)
+        mutableIntStateOf(0)
     }
 
     var patCount by remember {
@@ -209,8 +238,8 @@ fun AuraPlantRootScreen() {
             plantMood = saved.plantMood
             plantHappiness = saved.happiness
         } else {
-            waterLevel = 2
-            lightLevel = 4
+            waterLevel = 0
+            lightLevel = 0
             patCount = 0
             affirmationCount = 0
             dropCount = 0
@@ -263,8 +292,8 @@ fun AuraPlantRootScreen() {
             if (newDate != today) {
                 today = newDate
 
-                waterLevel = 2
-                lightLevel = 4
+                waterLevel = 0
+                lightLevel = 0
                 patCount = 0
                 affirmationCount = 0
                 dropCount = 0
@@ -916,14 +945,30 @@ fun AuraPlantRootScreen() {
     }
 
     // Weekly mood tracking
-    val weeklyMoods = listOf(
-        DayMoodEntry("SUN", PlantMood.HAPPY),
-        DayMoodEntry("MON", PlantMood.HAPPY),
-        DayMoodEntry("TUE", PlantMood.THIRSTY),
-        DayMoodEntry("WED", PlantMood.HAPPY),
-        DayMoodEntry("THU", PlantMood.HAPPY),
-        DayMoodEntry("FRI", PlantMood.THIRSTY),
-        DayMoodEntry("SAT", currentMood)
+    // Seven days of hardcoded mood history, starting from yesterday
+    val hardcodedMoodHistory = listOf(
+        PlantMood.HAPPY,
+        PlantMood.HAPPY,
+        PlantMood.THIRSTY,
+        PlantMood.HAPPY,
+        PlantMood.SAD,
+        PlantMood.THIRSTY,
+        PlantMood.HAPPY
+    )
+
+     // Automatically calculate the previous seven days
+    val todayDate = LocalDate.now()
+
+    val weeklyMoods = (7 downTo 1).map { daysAgo ->
+        val date = todayDate.minusDays(daysAgo.toLong())
+
+        DayMoodEntry(
+            dayLabel = date.dayOfWeek.name.take(3),
+            mood = hardcodedMoodHistory[7 - daysAgo]
+        )
+    } + DayMoodEntry(
+        dayLabel = "TODAY",
+        mood = currentMood
     )
 
     // Main application layout
@@ -932,34 +977,36 @@ fun AuraPlantRootScreen() {
         floatingActionButtonPosition = FabPosition.Center,
 
         floatingActionButton = {
+            if (selectedTab == 0) {
 
-            FloatingActionButton(
-                onClick = {
-                    onMicButtonClick()
-                },
-                containerColor = if (isRecordingQuote) {
-                    BarRed
-                } else {
-                    TerracottaBox
-                },
-                contentColor = CardSurface,
-                shape = CircleShape,
-                modifier = Modifier.size(60.dp)
-            ) {
+                FloatingActionButton(
+                    onClick = {
+                        onMicButtonClick()
+                    },
+                    containerColor = if (isRecordingQuote) {
+                        BarRed
+                    } else {
+                        TerracottaBox
+                    },
+                    contentColor = CardSurface,
+                    shape = CircleShape,
+                    modifier = Modifier.size(60.dp)
+                ) {
 
-                Icon(
-                    imageVector = if (isRecordingQuote) {
-                        Icons.Default.Stop
-                    } else {
-                        Icons.Default.Mic
-                    },
-                    contentDescription = if (isRecordingQuote) {
-                        "Stop Recording"
-                    } else {
-                        "Record Audio Quote"
-                    },
-                    modifier = Modifier.size(28.dp)
-                )
+                    Icon(
+                        imageVector = if (isRecordingQuote) {
+                            Icons.Default.Stop
+                        } else {
+                            Icons.Default.Mic
+                        },
+                        contentDescription = if (isRecordingQuote) {
+                            "Stop Recording"
+                        } else {
+                            "Record Audio Quote"
+                        },
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         },
 
@@ -1066,16 +1113,16 @@ fun AuraPlantRootScreen() {
 
                     weeklyMoods = weeklyMoods,
 
-                    onToggleMood = {
-
-                        if (currentMood == PlantMood.SAD) {
-                            currentMood = PlantMood.HAPPY
-                            waterLevel = 5
-                        } else {
-                            currentMood = PlantMood.SAD
-                            waterLevel = 2
-                        }
-                    }
+//                    onToggleMood = {
+//
+//                        if (currentMood == PlantMood.SAD) {
+//                            currentMood = PlantMood.HAPPY
+//                            waterLevel = 5
+//                        } else {
+//                            currentMood = PlantMood.SAD
+//                            waterLevel = 2
+//                        }
+//                    }
                 )
 
                 1 -> MoodCalendarJournalScreen(
@@ -1133,7 +1180,7 @@ fun DashboardTabContent(
     isPlayingAudio: Boolean,
     onTogglePlayAudio: () -> Unit,
     weeklyMoods: List<DayMoodEntry>,
-    onToggleMood: () -> Unit,
+//    onToggleMood: () -> Unit,
     activeInteraction: PlantInteractionEvent = PlantInteractionEvent.NONE,
     interactionAlertMessage: String? = null,
     onDismissAlert: () -> Unit = {},
@@ -1151,7 +1198,9 @@ fun DashboardTabContent(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(175.dp),
+                .height(175.dp)
+                .background(SageHeader)
+                .windowInsetsPadding(WindowInsets.statusBars),
             contentAlignment = Alignment.TopCenter
         ) {
 
@@ -1418,24 +1467,25 @@ fun DashboardTabContent(
                 waterLevel = waterLevel
             )
 
-            // UI test button
-            OutlinedButton(
-                onClick = onToggleMood,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    "Test UI State: Toggle Happy / Thirsty",
-                    color = TextDark
-                )
-            }
-
-            Spacer(
-                modifier = Modifier.height(76.dp)
-            )
+//            // UI test button
+//            OutlinedButton(
+//                onClick = onToggleMood,
+//                modifier = Modifier.fillMaxWidth(),
+//                shape = RoundedCornerShape(12.dp)
+//            ) {
+//                Text(
+//                    "Test UI State: Toggle Happy / Thirsty",
+//                    color = TextDark
+//                )
+//            }
+//
+//            Spacer(
+//                modifier = Modifier.height(76.dp)
+//            )
         }
     }
 }
+
 
 
 // Mood Calendar Screen
@@ -1450,21 +1500,21 @@ fun MoodCalendarJournalScreen(
         )
     }
 
-    val monthlyEntries = remember(todayMood) {
+    val fixedMoods = mapOf(
+        17 to PlantMood.HAPPY,
+        18 to PlantMood.THIRSTY,
+        19 to PlantMood.HAPPY,
+        20 to PlantMood.SAD,
+        21 to PlantMood.THIRSTY,
+        22 to PlantMood.HAPPY,
+        23 to PlantMood.HAPPY
+    )
 
-        val calendar = Calendar.getInstance()
+    val monthlyEntries = remember {
+        (1..30).map { day ->
 
-        val daysInMonth =
-            calendar.getActualMaximum(Calendar.DAY_OF_MONTH)
-
-        (1..daysInMonth).map { day ->
-
-            val mood = when {
-                day == calendar.get(Calendar.DAY_OF_MONTH) -> todayMood
-                day % 6 == 0 -> PlantMood.SAD
-                day % 4 == 0 -> PlantMood.THIRSTY
-                else -> PlantMood.HAPPY
-            }
+            // Only 17–23 November have recorded moods.
+            val mood = fixedMoods[day] ?: PlantMood.HAPPY
 
             DayMoodEntry(
                 dayLabel = day.toString(),
@@ -1472,6 +1522,7 @@ fun MoodCalendarJournalScreen(
             )
         }
     }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1493,14 +1544,25 @@ fun MoodCalendarJournalScreen(
 
             onDayClick = { entry ->
 
-                val statusText = when (entry.mood) {
-                    PlantMood.HAPPY -> "Happy & well-hydrated"
-                    PlantMood.THIRSTY -> "Needed a bit more water"
-                    PlantMood.SAD -> "Low moisture / needed attention"
-                }
+                val day = entry.dayLabel.toIntOrNull()
 
-                selectedDayNote =
+                val dayNumber = entry.dayLabel.toIntOrNull()
+
+                val hasMood = dayNumber != null && dayNumber in 17..23
+
+                selectedDayNote = if (hasMood) {
+
+                    val statusText = when (entry.mood) {
+                        PlantMood.HAPPY -> "Happy & well-hydrated"
+                        PlantMood.THIRSTY -> "Needed a bit more water"
+                        PlantMood.SAD -> "Low moisture / needed attention"
+                    }
+
                     "Day ${entry.dayLabel}: $statusText"
+
+                } else {
+                    "Day ${entry.dayLabel}: No mood recorded."
+                }
             }
         )
 
@@ -1509,7 +1571,6 @@ fun MoodCalendarJournalScreen(
         )
     }
 }
-
 
 // Placeholder screen
 @Composable

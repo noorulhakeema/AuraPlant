@@ -15,7 +15,8 @@ data class EmotionAnalysis(
     val sentiment: String,
     val emotionChange: Int,
     val reason: String,
-    val plantResponse: String
+    val plantResponse: String,
+    val validAffirmation: Boolean
 )
 
 class GeminiEmotionAnalyzer {
@@ -43,27 +44,59 @@ class GeminiEmotionAnalyzer {
 
         val prompt = """
             You are the emotion analyser for AuraPlant.
-
+        
             Analyse the emotional tone of the user's words.
-
+        
             Classify the transcript as:
             positive, negative, or neutral.
-
-            Rules:
+        
+            Also determine whether the message is a genuine
+            word of affirmation directed towards the plant.
+        
+            Affirmation rules:
+            - validAffirmation = true when the user expresses
+              kindness, encouragement, appreciation, love or
+              reassurance towards the plant.
+            - validAffirmation = false for ordinary questions,
+              unrelated positive statements, neutral statements,
+              negative statements or meaningless speech.
+            - A positive sentiment does not automatically mean
+              it is a valid affirmation.
+        
+            Sentiment rules:
             - Positive: kind, loving, encouraging or appreciative.
             - Negative: hostile, insulting or discouraging.
             - Neutral: no clear positive or negative emotion.
             - Consider the context of the complete sentence.
             - Do not classify ordinary questions as negative.
-            - Positive emotionChange must be between 1 and 15.
-            - Negative emotionChange must be between -1 and -15.
-            - Neutral emotionChange must be 0.
+        
+            Emotion change rules:
+            - Positive: between 1 and 15.
+            - Negative: between -1 and -15.
+            - Neutral: 0.
+        
+            Other rules:
             - reason must briefly explain the classification.
             - plantResponse must be one short friendly sentence.
-
+        
+            Also determine whether the user's words are a genuine
+            affirmation directed towards their plant.
+            
+            Affirmation rules:
+            - true if the user expresses kindness, encouragement,
+              appreciation, love or reassurance towards the plant.
+            - false for ordinary questions, unrelated positive
+              statements, neutral statements or negative statements.
+            - A positive sentiment does not automatically mean
+              it is a valid affirmation.
+            
             Return a single JSON object with exactly these keys:
-            "sentiment", "emotionChange", "reason", "plantResponse".
-
+            "sentiment",
+            "emotionChange",
+            "reason",
+            "plantResponse",
+            "validAffirmation".
+        
             Transcript:
             $transcript
         """.trimIndent()
@@ -168,6 +201,13 @@ class GeminiEmotionAnalyzer {
                     .takeIf { it.isNotBlank() }
                     ?: throw Exception("Missing or empty plant response.")
 
+                // Validate the affirmation field
+                if (!json.has("validAffirmation") ||
+                    json.isNull("validAffirmation")) {
+                    throw Exception("Missing validAffirmation.")
+                }
+
+                val validAffirmation = json.getBoolean("validAffirmation")
                 Log.d(
                     "GeminiEmotion",
                     "Valid response received on attempt $attempt."
@@ -177,7 +217,8 @@ class GeminiEmotionAnalyzer {
                     sentiment = sentiment,
                     emotionChange = emotionChange,
                     reason = reason,
-                    plantResponse = plantResponse
+                    plantResponse = plantResponse,
+                    validAffirmation = validAffirmation && sentiment == "positive"
                 )
 
             } catch (e: CancellationException) {

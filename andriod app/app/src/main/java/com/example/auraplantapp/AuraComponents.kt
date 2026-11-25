@@ -1,42 +1,35 @@
 package com.example.auraplantapp
-
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.auraplantapp.ui.theme.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
+import com.example.auraplantapp.ui.theme.*
 
 enum class PlantMood { HAPPY, SAD, THIRSTY }
 
@@ -197,7 +190,6 @@ data class DayMoodEntry(
 )
 
 //mood for calendar
-
 @Composable
 fun DailyMoodCalendarCard(
     title: String = "MOOD TRACKING",
@@ -229,11 +221,24 @@ fun DailyMoodCalendarCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     week.forEach { entry ->
-                        val badgeColor = when (entry.mood) {
-                            PlantMood.HAPPY -> SageHeader
-                            PlantMood.THIRSTY -> BarOrange
-                            PlantMood.SAD -> BarRed
+                        val dayNumber = entry.dayLabel.toIntOrNull()
+
+                        val hasMood = if (dayNumber != null) {
+                            dayNumber in 17..23
+                        } else {
+                            true
                         }
+
+                        val badgeColor = if (hasMood) {
+                            when (entry.mood) {
+                                PlantMood.HAPPY -> SageHeader
+                                PlantMood.THIRSTY -> BarOrange
+                                PlantMood.SAD -> BarRed
+                            }
+                        } else {
+                            Color.LightGray
+                        }
+
                         val faceEmoji = when (entry.mood) {
                             PlantMood.HAPPY -> "😊"
                             PlantMood.THIRSTY -> "😐"
@@ -244,26 +249,41 @@ fun DailyMoodCalendarCard(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
                                 .weight(1f)
-                                .clickable { onDayClick(entry) }
+                                .clickable {
+                                    onDayClick(entry)
+                                }
                                 .padding(vertical = 2.dp)
                         ) {
                             Text(
                                 text = entry.dayLabel,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextDark.copy(alpha = 0.75f)
+                                color = if (hasMood) TextDark.copy(alpha = 0.75f) else Color.Gray
                             )
+
                             Spacer(modifier = Modifier.height(6.dp))
+
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .background(badgeColor.copy(alpha = 0.25f), CircleShape)
-                                    .border(1.5.dp, badgeColor, CircleShape)
+                                    .background(
+                                        badgeColor.copy(alpha = if (hasMood) 0.25f else 0.15f),
+                                        CircleShape
+                                    )
+                                    .border(
+                                        1.5.dp,
+                                        badgeColor,
+                                        CircleShape
+                                    )
                             ) {
-                                Text(text = faceEmoji, fontSize = 16.sp)
+                                if (hasMood) {
+                                    Text(text = faceEmoji, fontSize = 16.sp)
+                                }
                             }
                         }
+
+
                     }
                 }
             }

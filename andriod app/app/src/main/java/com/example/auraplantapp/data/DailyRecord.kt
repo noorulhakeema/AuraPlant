@@ -15,16 +15,48 @@ const val MAX_STATUS_LEVEL = 5
 @Entity(tableName = "daily_record")
 data class DailyRecord(
     @PrimaryKey val epochDay: Long,
+
+    // Voice care
     val positiveMessageDone: Boolean = false,
-    val sentimentScore: Float? = null, // AI verdict only; raw audio is never stored
+    val sentimentScore: Float? = null,
+    val recordedQuoteText: String? = null,
+
+    // Water care
     val wateredDone: Boolean = false,
-    val waterLevel: Int = 0,           // +1 per watering, capped at MAX_STATUS_LEVEL
+    val waterLevel: Int = 0,
+
+    // Light care
     val lightDone: Boolean = false,
-    val lightLevel: Int = 0,           // latest light reading of the day
+    val lightLevel: Int = 0,
+
+    // Physical interaction
     val patCount: Int = 0,
-    val dropCount: Int = 0,
-    val recordedQuoteText: String? = null // transcription of the user's recorded quote; audio is not stored
+
+    // Other plant interactions
+    val dropCount: Int = 0
 ) {
+    val waterScore: Float
+        get() = (waterLevel.coerceIn(0, MAX_STATUS_LEVEL)).toFloat() / MAX_STATUS_LEVEL
+
+    val lightScore: Float
+        get() = (lightLevel.coerceIn(0, MAX_STATUS_LEVEL)).toFloat() / MAX_STATUS_LEVEL
+
+    val voiceScore: Float
+        get() = if (positiveMessageDone) 1f else 0f
+
+    val patScore: Float
+        get() = if (patCount > 0) 1f else 0f
+
+    val lifePercentage: Int
+        get() = (
+                (waterScore + lightScore + voiceScore + patScore) / 4f * 100f
+                ).toInt()
+
     val tasksCompleted: Int
-        get() = listOf(positiveMessageDone, wateredDone, lightDone).count { it }
+        get() = listOf(
+            positiveMessageDone,
+            wateredDone,
+            lightDone,
+            patCount > 0
+        ).count { it }
 }
