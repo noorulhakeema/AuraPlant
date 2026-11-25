@@ -212,9 +212,12 @@ fun AuraPlantRootScreen() {
         mutableStateOf("Content")
     }
 
-    var plantHappiness by remember {
-        mutableIntStateOf(50)
-    }
+    // Plant happiness is calculated from four daily care activities.
+    val plantHappiness =
+        (lightLevel.coerceIn(0, 5) * 5) +
+                (waterLevel.coerceIn(0, 5) * 5) +
+                (if (affirmationCount > 0) 25 else 0) +
+                (if (patCount > 0) 25 else 0)
 
     var currentLux by remember {
         mutableStateOf(0f)
@@ -236,7 +239,6 @@ fun AuraPlantRootScreen() {
             transcribedQuote = saved.transcript
             plantResponseText = saved.plantResponse
             plantMood = saved.plantMood
-            plantHappiness = saved.happiness
         } else {
             waterLevel = 0
             lightLevel = 0
@@ -246,7 +248,6 @@ fun AuraPlantRootScreen() {
             transcribedQuote = ""
             plantResponseText = ""
             plantMood = "Content"
-            plantHappiness = 50
         }
 
         dailyDataLoaded = true
@@ -301,7 +302,6 @@ fun AuraPlantRootScreen() {
                 transcribedQuote = ""
                 plantResponseText = ""
                 plantMood = "Content"
-                plantHappiness = 50
             }
         }
     }
@@ -366,7 +366,8 @@ fun AuraPlantRootScreen() {
 
         when (cleanEvent) {
 
-            "DROP", "DROPPED", "TIPPED", "FALL" -> {
+            "TIPPED" -> {
+
                 dropCount++
 
                 activeInteraction = PlantInteractionEvent.DROPPED
@@ -376,18 +377,23 @@ fun AuraPlantRootScreen() {
                     "Your plant has fallen over! Please help it."
 
                 lastDeviceMessage = "Plant has fallen over!"
+
+                Log.d("AuraPlant", "TIPPED received")
             }
 
-            "UPRIGHT", "NORMAL" -> {
+            "UPRIGHT" -> {
+
                 activeInteraction = PlantInteractionEvent.NONE
                 interactionAlertMessage = null
 
-                plantMood = "Happy"
                 lastDeviceMessage = "Plant is upright again!"
+
+                Log.d("AuraPlant", "UPRIGHT received")
             }
 
             "PAT", "PATTED" -> {
-                patCount++
+
+                patCount = 1
 
                 activeInteraction = PlantInteractionEvent.PATTED
                 plantMood = "Happy"
@@ -396,10 +402,6 @@ fun AuraPlantRootScreen() {
                     "Your plant says: pat pat! ♥"
 
                 lastDeviceMessage = "Plant was patted!"
-            }
-
-            "SHAKE" -> {
-                lastDeviceMessage = "Plant is shaking!"
             }
         }
     }
@@ -705,8 +707,6 @@ fun AuraPlantRootScreen() {
             return
         }
 
-        affirmationCount++
-
         isAnalyzingQuote = true
         isPlantThinking = true
         quoteStatusText = "Analysing your words..."
@@ -716,21 +716,19 @@ fun AuraPlantRootScreen() {
             try {
                 val result = emotionAnalyzer.analyze(finalTranscript)
 
-                val updatedState = PlantEmotionManager.applyAnalysis(
-                    currentHappiness = plantHappiness,
-                    analysis = result
-                )
+                // Award the AI motivational quote points.
+                // Only one successful quote is counted per day.
+                affirmationCount = 1
 
-                plantHappiness = updatedState.happiness
-                plantMood = updatedState.mood
+                // Update the plant's mood and response from Gemini.
+                plantMood = result.sentiment
+                plantResponseText = result.plantResponse
 
-                currentMood = when (updatedState.mood) {
+                currentMood = when (result.sentiment) {
                     "Sad" -> PlantMood.SAD
                     "Happy" -> PlantMood.HAPPY
                     else -> PlantMood.HAPPY
                 }
-
-                plantResponseText = result.plantResponse
 
                 quoteStatusText =
                     "AI analysis complete: ${result.sentiment}"
