@@ -14,8 +14,6 @@ AuraPlant is an interactive, 3D-printed smart desk plant built on the TinyCircui
 
 *Drop it or tip it over*: Dropping triggers a 3-second dizzy reaction; laying it on its side drops the leaves, subtracts 10 vitality, holds the dizzy face, and alerts the app until set upright.
 
-*Talk near the phone*: Speech detected by the app prompts the plant to perk up with a talking animation and +10 vitality.
-
 *Leave it in the dark or ignore it*: Vitality slowly decays over time (fastest in the dark), causing the leaves to droop and the face to turn sad or ask for light; after 10 minutes without interaction, it falls asleep.
 
 **Features**
@@ -34,6 +32,7 @@ Voice Affirmations: Records spoken phrases, transcribes them on-device, and uses
 Care Tracking: Includes an in-app watering control, ambient light monitor, pat/shake alerts, mood calendar, and local persistence via Room.
 
 **Hardware**
+
 Controller & Display: TinyScreen+ (ASM2022)
 BLE: ST BLE TinyShield (ASD2116-R)
 Accelerometer: Accelerometer TinyShield (ASD2511-R-A)
