@@ -50,7 +50,6 @@ AuraPlant/
 ├── docs/                 # BLE UUID reference and project documentation
 ├── firmware/
 │   ├── aura_core/        # Main Arduino firmware (aura_core.ino, UART.ino, display headers)
-│   ├── tinyscreen_face/  # Standalone display animation sketch
 │   └── hardware_tests/   # Individual sensor and actuator test sketches
 ├── index.html            # Web Bluetooth test page for desktop browser testing
 └── README.md
