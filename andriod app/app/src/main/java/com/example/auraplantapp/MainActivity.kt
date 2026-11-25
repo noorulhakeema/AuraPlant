@@ -224,6 +224,20 @@ fun AuraPlantRootScreen() {
         mutableStateOf(0f)
     }
 
+// Smoothed light sensor reading
+    var smoothedLux by remember {
+        mutableStateOf<Float?>(null)
+    }
+
+// Count consecutive readings before accepting a change
+    var pendingLightLevel by remember {
+        mutableIntStateOf(-1)
+    }
+
+    var pendingLightCount by remember {
+        mutableIntStateOf(0)
+    }
+
     var boardVitality by remember {
         mutableIntStateOf(0)
     }
@@ -396,10 +410,12 @@ fun AuraPlantRootScreen() {
                 Log.d("AuraPlant", "TIPPED received")
             }
 
-            "UPRIGHT" -> {
+            "UPRIGHT", "NORMAL" -> {
 
                 activeInteraction = PlantInteractionEvent.NONE
                 interactionAlertMessage = null
+
+                currentMood = PlantMood.HAPPY
 
                 lastDeviceMessage = "Plant is upright again!"
 
@@ -408,6 +424,7 @@ fun AuraPlantRootScreen() {
 
             "PAT", "PATTED" -> {
 
+                // Only award the pat happiness points once per day.
                 patCount = 1
 
                 activeInteraction = PlantInteractionEvent.PATTED
@@ -436,24 +453,6 @@ fun AuraPlantRootScreen() {
                 }
 
                 Log.d("AuraPlant BLE", "Plant is being shaken!")
-            }
-
-            "UPRIGHT", "NORMAL" -> {
-                activeInteraction = PlantInteractionEvent.NONE
-                interactionAlertMessage = null
-                currentMood = PlantMood.HAPPY
-            }
-
-            "PAT", "PATTED" -> {
-                patCount++
-
-                activeInteraction = PlantInteractionEvent.PATTED
-                plantMood = "Happy"
-
-                interactionAlertMessage =
-                    "Your plant says: pat pat! ♥"
-
-                lastDeviceMessage = "Plant was patted!"
             }
         }
     }
@@ -489,23 +488,62 @@ fun AuraPlantRootScreen() {
 
                     when {
 
-                        // Light sensor reading
+                        // Light sensor reading with smoothing and change confirmation
                         cleanMessage.startsWith("L:", ignoreCase = true) -> {
 
                             val lux = cleanMessage
                                 .substringAfter(":")
                                 .toFloatOrNull()
 
-                            if (lux != null) {
+                            if (lux != null && lux >= 0f) {
+
                                 currentLux = lux
 
-                                lightLevel = when {
-                                    lux <= 0f -> 0
-                                    lux <= 0.35f -> 1
-                                    lux <= 0.8f -> 2
-                                    lux <= 1.3f -> 3
-                                    lux <= 1.8f -> 4
+                                // Smooth out sudden sensor fluctuations.
+                                // 70% previous reading + 30% new reading.
+                                smoothedLux = smoothedLux?.let {
+                                    (it * 0.7f) + (lux * 0.3f)
+                                } ?: lux
+
+                                val stableLux = smoothedLux ?: lux
+
+                                // Convert the smoothed reading into a light level.
+                                val calculatedLevel = when {
+                                    stableLux < 0.10f -> 0
+                                    stableLux < 0.30f -> 1
+                                    stableLux < 0.60f -> 2
+                                    stableLux < 1.00f -> 3
+                                    stableLux < 1.50f -> 4
                                     else -> 5
+                                }
+
+                                // Only accept a new level after two consecutive readings.
+                                if (calculatedLevel != lightLevel) {
+
+                                    if (pendingLightLevel == calculatedLevel) {
+                                        pendingLightCount++
+                                    } else {
+                                        pendingLightLevel = calculatedLevel
+                                        pendingLightCount = 1
+                                    }
+
+                                    if (pendingLightCount >= 2) {
+
+                                        lightLevel = calculatedLevel
+
+                                        pendingLightLevel = -1
+                                        pendingLightCount = 0
+
+                                        Log.d(
+                                            "AuraPlant Light",
+                                            "Light level updated: $lightLevel (reading: $stableLux)"
+                                        )
+                                    }
+
+                                } else {
+
+                                    pendingLightLevel = -1
+                                    pendingLightCount = 0
                                 }
                             }
                         }
@@ -1087,7 +1125,7 @@ fun AuraPlantRootScreen() {
                     isBluetoothReady = isBluetoothReady,
                     activeInteraction = activeInteraction,
                     interactionAlertMessage = interactionAlertMessage,
-                    onSimulateDrop = { handleHardwareInteraction("DROP") },
+                    onSimulateDrop = { handleHardwareInteraction("TIPPED") },
                     onSimulatePat = { handleHardwareInteraction("PAT") },
                     // NEW SHAKE BUTTON
                     onSimulateShake = {
@@ -1496,64 +1534,64 @@ fun DashboardTabContent(
                 onWaterPlant = onWaterPlant
             )
 
-            // Bluetooth device message
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+//            // Bluetooth device message
+//            Column(
+//                verticalArrangement = Arrangement.spacedBy(10.dp),
+//                modifier = Modifier.fillMaxWidth()
+//            ) {
+//
+//                if (lastDeviceMessage.isNotBlank()) {
+//                    Text(
+//                        text = "Device says: $lastDeviceMessage",
+//                        color = TextDark,
+//                        fontSize = 13.sp
+//                    )
+//                }
+//            }
 
-                if (lastDeviceMessage.isNotBlank()) {
-                    Text(
-                        text = "Device says: $lastDeviceMessage",
-                        color = TextDark,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-
-            // Quick test buttons for Drop alert & Pat animation & SHAKE
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-
-                OutlinedButton(
-                    onClick = onSimulateDrop,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        "Test Drop",
-                        color = BarRed,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onSimulatePat,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        "Test Pat ♥",
-                        color = SageHeader,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-
-                OutlinedButton(
-                    onClick = onSimulateShake,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        "Test Shake",
-                        color = BarRed,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
+//            // Quick test buttons for Drop alert & Pat animation & SHAKE
+//
+//            Row(
+//                modifier = Modifier.fillMaxWidth(),
+//                horizontalArrangement = Arrangement.spacedBy(8.dp)
+//            ) {
+//
+//                OutlinedButton(
+//                    onClick = onSimulateDrop,
+//                    modifier = Modifier.weight(1f),
+//                    shape = RoundedCornerShape(12.dp)
+//                ) {
+//                    Text(
+//                        "Test Drop",
+//                        color = BarRed,
+//                        fontWeight = FontWeight.SemiBold
+//                    )
+//                }
+//
+//                OutlinedButton(
+//                    onClick = onSimulatePat,
+//                    modifier = Modifier.weight(1f),
+//                    shape = RoundedCornerShape(12.dp)
+//                ) {
+//                    Text(
+//                        "Test Pat ♥",
+//                        color = SageHeader,
+//                        fontWeight = FontWeight.SemiBold
+//                    )
+//                }
+//
+//                OutlinedButton(
+//                    onClick = onSimulateShake,
+//                    modifier = Modifier.weight(1f),
+//                    shape = RoundedCornerShape(12.dp)
+//                ) {
+//                    Text(
+//                        "Test Shake",
+//                        color = BarRed,
+//                        fontWeight = FontWeight.SemiBold
+//                    )
+//                }
+//            }
 
 
             // Water and light status
@@ -1755,52 +1793,6 @@ fun PatHeartAnimationOverlay(
         }
     }
 }
-
-//SHAKE ANIMATION
-@Composable
-fun ShakeWarningAnimation(
-    visible: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(
-        label = "shakeTransition"
-    )
-
-    val shakeOffset by infiniteTransition.animateFloat(
-        initialValue = -7f,
-        targetValue = 7f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 65),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "shakeOffset"
-    )
-
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(200)),
-        exit = fadeOut(tween(300)),
-        modifier = modifier
-    ) {
-        Text(
-            text = "Please don't shake me!",
-            fontSize = 15.sp,
-            fontWeight = FontWeight.Bold,
-            color = BarRed,
-            modifier = Modifier
-                .offset(x = shakeOffset.dp)
-                .background(
-                    color = CardSurface,
-                    shape = RoundedCornerShape(20.dp)
-                )
-                .padding(
-                    horizontal = 14.dp,
-                    vertical = 9.dp
-                )
-        )
-    }
-}
-
 
 // Plant Insights Screen
 @Composable
