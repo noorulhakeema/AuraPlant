@@ -324,6 +324,11 @@ fun AuraPlantRootScreen() {
         mutableStateOf(PlantMood.THIRSTY)
     }
 
+    // Actual face ID received from the Arduino
+    var arduinoFaceId by remember {
+        mutableIntStateOf(1)
+    }
+
 // Arduino starts with vitality = 60.
     var boardVitality by remember {
         mutableIntStateOf(60)
@@ -353,6 +358,21 @@ fun AuraPlantRootScreen() {
             boardVitality >= 70 -> PlantMood.HAPPY
             boardVitality >= 40 -> PlantMood.THIRSTY
             else -> PlantMood.SAD
+        }
+    }
+
+    fun updateMoodFromArduinoFace(faceId: Int) {
+
+        arduinoFaceId = faceId
+
+        currentMood = when (faceId) {
+            0 -> PlantMood.HAPPY
+            1 -> PlantMood.HAPPY
+            2 -> PlantMood.SAD
+            4 -> PlantMood.SAD
+            5 -> PlantMood.THIRSTY
+            6 -> PlantMood.THIRSTY
+            else -> currentMood
         }
     }
 
@@ -611,6 +631,17 @@ fun AuraPlantRootScreen() {
                             }
                         }
 
+                        cleanMessage.startsWith("FACE:", ignoreCase = true) -> {
+                            val faceId = cleanMessage.substringAfter(":").toIntOrNull()
+
+                            faceId?.let { id ->
+                                if (id in listOf(0, 1, 2, 4, 5, 6)) {
+                                    arduinoFaceId = id
+                                    Log.d("AuraPlant BLE", "Arduino face received: $id")
+                                }
+                            }
+                        }
+                        
                         // Hardware events
                         cleanMessage.startsWith("E:", ignoreCase = true) -> {
                             currentHardwareInteraction(cleanMessage)
@@ -620,6 +651,7 @@ fun AuraPlantRootScreen() {
                             currentHardwareInteraction(cleanMessage)
                         }
                     }
+
 
                     Log.d(
                         "AuraPlant BLE",
