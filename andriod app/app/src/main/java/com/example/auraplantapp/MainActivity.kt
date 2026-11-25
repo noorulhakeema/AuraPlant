@@ -115,7 +115,8 @@ import java.time.YearMonth
 enum class PlantInteractionEvent {
     NONE,
     DROPPED,
-    PATTED
+    PATTED,
+    SHAKEN
 }
 
 
@@ -343,19 +344,33 @@ fun AuraPlantRootScreen() {
         interactionAlertMessage = null
     }
 
-    // Automatically clear pat animation
+// Automatically clear pat and shake animations
     LaunchedEffect(activeInteraction) {
-        if (activeInteraction == PlantInteractionEvent.PATTED) {
-            delay(2400)
 
-            if (activeInteraction == PlantInteractionEvent.PATTED) {
-                activeInteraction = PlantInteractionEvent.NONE
-                interactionAlertMessage = null
+        when (activeInteraction) {
+
+            PlantInteractionEvent.PATTED -> {
+                delay(2400)
+
+                if (activeInteraction == PlantInteractionEvent.PATTED) {
+                    activeInteraction = PlantInteractionEvent.NONE
+                    interactionAlertMessage = null
+                }
             }
+
+            PlantInteractionEvent.SHAKEN -> {
+                delay(3000)
+
+                if (activeInteraction == PlantInteractionEvent.SHAKEN) {
+                    activeInteraction = PlantInteractionEvent.NONE
+                    interactionAlertMessage = null
+                }
+            }
+
+            else -> Unit
         }
     }
-
-    // Handle hardware events
+    // Handle drop and pat events from BLE
     fun handleHardwareInteraction(event: String) {
 
         val cleanEvent = event
@@ -394,6 +409,43 @@ fun AuraPlantRootScreen() {
             "PAT", "PATTED" -> {
 
                 patCount = 1
+
+                activeInteraction = PlantInteractionEvent.PATTED
+                plantMood = "Happy"
+
+                interactionAlertMessage =
+                    "Your plant says: pat pat! ♥"
+
+                lastDeviceMessage = "Plant was patted!"
+            }
+
+            "SHAKE", "SHAKEN" -> {
+
+                activeInteraction = PlantInteractionEvent.SHAKEN
+
+                currentMood = PlantMood.SAD
+
+                interactionAlertMessage = "Please don't shake me!"
+
+                if (currentNotificationsEnabled) {
+                    AuraNotificationHelper.sendAlert(
+                        context = context,
+                        title = "AuraPlant Alert!",
+                        message = "Please don't shake me!"
+                    )
+                }
+
+                Log.d("AuraPlant BLE", "Plant is being shaken!")
+            }
+
+            "UPRIGHT", "NORMAL" -> {
+                activeInteraction = PlantInteractionEvent.NONE
+                interactionAlertMessage = null
+                currentMood = PlantMood.HAPPY
+            }
+
+            "PAT", "PATTED" -> {
+                patCount++
 
                 activeInteraction = PlantInteractionEvent.PATTED
                 plantMood = "Happy"
@@ -1035,18 +1087,13 @@ fun AuraPlantRootScreen() {
                     isBluetoothReady = isBluetoothReady,
                     activeInteraction = activeInteraction,
                     interactionAlertMessage = interactionAlertMessage,
-
-                    onSimulateDrop = {
-                        handleHardwareInteraction("DROP")
+                    onSimulateDrop = { handleHardwareInteraction("DROP") },
+                    onSimulatePat = { handleHardwareInteraction("PAT") },
+                    // NEW SHAKE BUTTON
+                    onSimulateShake = {
+                        handleHardwareInteraction("SHAKE")
                     },
-
-                    onSimulatePat = {
-                        handleHardwareInteraction("PAT")
-                    },
-
-                    onDismissAlert = {
-                        clearInteractionAlert()
-                    },
+                    onDismissAlert = { clearInteractionAlert() },
 
                     onConnectToPlant = {
                         connectToPlant()
@@ -1183,7 +1230,8 @@ fun DashboardTabContent(
     interactionAlertMessage: String? = null,
     onDismissAlert: () -> Unit = {},
     onSimulateDrop: () -> Unit = {},
-    onSimulatePat: () -> Unit = {}
+    onSimulatePat: () -> Unit = {},
+    onSimulateShake: () -> Unit = {}
 ) {
 
     Column(
@@ -1246,17 +1294,52 @@ fun DashboardTabContent(
                 }
             }
 
+
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.TopCenter
             ) {
-                TinyScreenFace(mood = currentMood)
 
+                val shakeTransition = rememberInfiniteTransition(
+                    label = "tinyScreenShake"
+                )
+
+                val screenShakeOffset by shakeTransition.animateFloat(
+                    initialValue = -5f,
+                    targetValue = 5f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 70),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "screenShakeOffset"
+                )
+
+                // Shake the TinyScreen only when the plant is shaken
+                Box(
+                    modifier = Modifier.offset(
+                        x = if (activeInteraction == PlantInteractionEvent.SHAKEN) {
+                            screenShakeOffset.dp
+                        } else {
+                            0.dp
+                        }
+                    )
+                ) {
+                    TinyScreenFace(mood = currentMood)
+                }
+
+                // Existing pat animation
                 PatHeartAnimationOverlay(
                     visible = activeInteraction == PlantInteractionEvent.PATTED,
                     modifier = Modifier.offset(y = 105.dp)
                 )
+
+                // New shake warning
+                ShakeWarningAnimation(
+                    visible = activeInteraction == PlantInteractionEvent.SHAKEN,
+                    modifier = Modifier.offset(y = 105.dp)
+                )
             }
+
         }
 
         // Main body cards
@@ -1428,10 +1511,11 @@ fun DashboardTabContent(
                 }
             }
 
-            // Quick test buttons
+            // Quick test buttons for Drop alert & Pat animation & SHAKE
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
 
                 OutlinedButton(
@@ -1440,7 +1524,7 @@ fun DashboardTabContent(
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
-                        "Test Drop Alert",
+                        "Test Drop",
                         color = BarRed,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -1457,7 +1541,20 @@ fun DashboardTabContent(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+
+                OutlinedButton(
+                    onClick = onSimulateShake,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "Test Shake",
+                        color = BarRed,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
+
 
             // Water and light status
             StatusMetersCard(
@@ -1658,6 +1755,98 @@ fun PatHeartAnimationOverlay(
         }
     }
 }
+
+//SHAKE ANIMATION
+@Composable
+fun ShakeWarningAnimation(
+    visible: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(
+        label = "shakeTransition"
+    )
+
+    val shakeOffset by infiniteTransition.animateFloat(
+        initialValue = -7f,
+        targetValue = 7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 65),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shakeOffset"
+    )
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200)),
+        exit = fadeOut(tween(300)),
+        modifier = modifier
+    ) {
+        Text(
+            text = "Please don't shake me!",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = BarRed,
+            modifier = Modifier
+                .offset(x = shakeOffset.dp)
+                .background(
+                    color = CardSurface,
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(
+                    horizontal = 14.dp,
+                    vertical = 9.dp
+                )
+        )
+    }
+}
+
+
+// Plant Insights Screen
+@Composable
+fun ShakeWarningAnimation(
+    visible: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(
+        label = "shakeTransition"
+    )
+
+    val shakeOffset by infiniteTransition.animateFloat(
+        initialValue = -7f,
+        targetValue = 7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 65),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shakeOffset"
+    )
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(200)),
+        exit = fadeOut(tween(300)),
+        modifier = modifier
+    ) {
+        Text(
+            text = "Please don't shake me!",
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = BarRed,
+            modifier = Modifier
+                .offset(x = shakeOffset.dp)
+                .background(
+                    color = CardSurface,
+                    shape = RoundedCornerShape(20.dp)
+                )
+                .padding(
+                    horizontal = 14.dp,
+                    vertical = 9.dp
+                )
+        )
+    }
+}
+
 
 
 // Plant Insights Screen
